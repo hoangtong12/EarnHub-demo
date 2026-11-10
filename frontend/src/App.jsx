@@ -1,11 +1,4 @@
-
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   Wallet,
@@ -19,7 +12,6 @@ import {
   Plus,
   Minus,
   Lock,
-  Unlock,
   KeyRound,
   RefreshCw,
   CheckCircle2,
@@ -28,41 +20,32 @@ import {
   X,
   CircleDollarSign,
   AlertCircle,
-  ExternalLink,
-  Clock,
   Gift,
-  Eye,
-  EyeOff,
+  ExternalLink,
+  User,
+  History,
+  Settings,
+  Coins,
+  Gamepad2,
 } from "lucide-react";
+
+/* =========================================================
+   EARNHUB PRO - FRONTEND
+   Login: identity + password
+   Register: username + email + password
+========================================================= */
 
 const API = (
   import.meta.env.VITE_API_URL || "http://localhost:5000/api"
 ).replace(/\/+$/, "");
 
-const money = (value) =>
-  Number(value || 0).toLocaleString("vi-VN", {
-    maximumFractionDigits: 2,
-  });
+const TOKEN_KEY = "earnhub_token";
+const OLD_TOKEN_KEY = "eh_token";
 
-const date = (value) => {
-  if (!value) return "—";
-
-  const parsed = new Date(value);
-
-  return Number.isNaN(parsed.getTime())
-    ? "—"
-    : parsed.toLocaleString("vi-VN");
-};
-
-async function request(path, token, options = {}) {
+async function request(path, token = "", options = {}) {
   const headers = {
-    Accept: "application/json",
-    ...(options.body
-      ? { "Content-Type": "application/json" }
-      : {}),
-    ...(token
-      ? { Authorization: `Bearer ${token}` }
-      : {}),
+    ...(options.body ? { "Content-Type": "application/json" } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...options.headers,
   };
 
@@ -71,75 +54,88 @@ async function request(path, token, options = {}) {
     headers,
   });
 
-  const result = await response.json().catch(() => ({}));
+  const text = await response.text();
+  let data = {};
+
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { message: text || "Phản hồi máy chủ không hợp lệ" };
+  }
 
   if (!response.ok) {
     throw new Error(
-      result.message ||
-        result.error ||
-        `Yêu cầu thất bại (HTTP ${response.status})`
+      data.message ||
+        data.error ||
+        data.msg ||
+        `Lỗi máy chủ (${response.status})`
     );
   }
 
-  return result;
+  return data;
 }
 
-function getArray(result, keys = []) {
-  if (Array.isArray(result)) return result;
+function getToken() {
+  return (
+    localStorage.getItem(TOKEN_KEY) ||
+    localStorage.getItem(OLD_TOKEN_KEY) ||
+    ""
+  );
+}
 
-  for (const key of keys) {
-    if (Array.isArray(result?.[key])) {
-      return result[key];
-    }
-  }
+function saveToken(token) {
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(OLD_TOKEN_KEY, token);
+}
 
-  if (Array.isArray(result?.data)) {
-    return result.data;
-  }
+function removeToken() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(OLD_TOKEN_KEY);
+}
 
+function getArray(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.users)) return data.users;
+  if (Array.isArray(data?.tasks)) return data.tasks;
+  if (Array.isArray(data?.withdrawals)) return data.withdrawals;
   return [];
 }
 
-function safeExternalUrl(value) {
-  if (typeof value !== "string") return "";
+function money(value) {
+  const number = Number(value || 0);
+  return new Intl.NumberFormat("vi-VN").format(
+    Number.isFinite(number) ? number : 0
+  );
+}
 
-  try {
-    const url = new URL(value);
-
-    if (
-      url.protocol !== "https:" &&
-      url.protocol !== "http:"
-    ) {
-      return "";
-    }
-
-    return url.href;
-  } catch {
-    return "";
-  }
+function formatDate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("vi-VN");
 }
 
 function getErrorMessage(error) {
   return error?.message || "Đã xảy ra lỗi. Vui lòng thử lại.";
 }
 
-function App() {
-  const [token, setToken] = useState(
-    () => localStorage.getItem("earnhub_token") || ""
-  );
+/* =========================================================
+   MAIN APP
+========================================================= */
 
+export default function App() {
+  const [token, setToken] = useState(getToken);
   const [user, setUser] = useState(null);
 
   const [authMode, setAuthMode] = useState("login");
   const [page, setPage] = useState("overview");
 
   const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(Boolean(token));
-
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-
-  const [showPassword, setShowPassword] = useState(false);
 
   const [wallet, setWallet] = useState({
     points: 0,
@@ -160,30 +156,20 @@ function App() {
   const isAdmin = user?.role === "admin";
 
   const logout = useCallback(() => {
-    localStorage.removeItem("earnhub_token");
-
+    removeToken();
     setToken("");
     setUser(null);
     setPage("overview");
-
-    setWallet({
-      points: 0,
-      balanceVND: 0,
-      transactions: [],
-    });
-
+    setWallet({ points: 0, balanceVND: 0, transactions: [] });
     setTasks([]);
     setWithdrawals([]);
     setMembers([]);
     setAdminWithdrawals([]);
-    setDashboard({});
-
-    setError("");
     setNotice("");
-    setMobileOpen(false);
+    setError("");
   }, []);
 
-  const load = useCallback(
+  const loadData = useCallback(
     async (activeToken = token) => {
       if (!activeToken) return;
 
@@ -191,95 +177,83 @@ function App() {
       setError("");
 
       try {
-        const [
-          meResult,
-          walletResult,
-          taskResult,
-          withdrawalResult,
-        ] = await Promise.all([
-          request("/auth/me", activeToken),
+        const meResult = await request("/auth/me", activeToken);
+        const currentUser = meResult.user || meResult.data || meResult;
+        setUser(currentUser);
+
+        const results = await Promise.allSettled([
           request("/wallet", activeToken),
           request("/tasks", activeToken),
           request("/withdrawals", activeToken),
         ]);
 
-        const currentUser =
-          meResult.user ||
-          meResult.data?.user ||
-          meResult.data ||
-          meResult;
+        if (results[0].status === "fulfilled") {
+          const data = results[0].value;
+          const walletData = data.wallet || data.data || data;
 
-        if (!currentUser) {
-          throw new Error("Không lấy được thông tin tài khoản.");
+          setWallet({
+            points: Number(
+              walletData.points ??
+                walletData.balance ??
+                walletData.coins ??
+                0
+            ),
+            balanceVND: Number(
+              walletData.balanceVND ??
+                walletData.balance_vnd ??
+                walletData.vnd ??
+                0
+            ),
+            transactions: getArray(
+              walletData.transactions || data.transactions || []
+            ),
+          });
         }
 
-        setUser(currentUser);
+        if (results[1].status === "fulfilled") {
+          setTasks(getArray(results[1].value));
+        }
 
-        setWallet({
-          points:
-            walletResult.points ??
-            walletResult.wallet?.points ??
-            0,
+        if (results[2].status === "fulfilled") {
+          setWithdrawals(getArray(results[2].value));
+        }
 
-          balanceVND:
-            walletResult.balanceVND ??
-            walletResult.wallet?.balanceVND ??
-            0,
+        const adminUser = currentUser?.role === "admin";
 
-          transactions:
-            walletResult.transactions ||
-            walletResult.wallet?.transactions ||
-            [],
-        });
-
-        setTasks(
-          getArray(taskResult, ["tasks"])
-        );
-
-        setWithdrawals(
-          getArray(withdrawalResult, ["withdrawals"])
-        );
-
-        if (currentUser.role === "admin") {
-          const [
-            dashResult,
-            memberResult,
-            adminWithdrawalResult,
-          ] = await Promise.all([
+        if (adminUser) {
+          const adminResults = await Promise.allSettled([
             request("/admin/dashboard", activeToken),
             request("/admin/users", activeToken),
             request("/admin/withdrawals", activeToken),
           ]);
 
-          setDashboard(
-            dashResult.dashboard ||
-              dashResult.data ||
-              dashResult
-          );
+          if (adminResults[0].status === "fulfilled") {
+            setDashboard(
+              adminResults[0].value.dashboard ||
+                adminResults[0].value.data ||
+                adminResults[0].value
+            );
+          }
 
-          setMembers(
-            getArray(memberResult, ["users"])
-          );
+          if (adminResults[1].status === "fulfilled") {
+            setMembers(getArray(adminResults[1].value));
+          }
 
-          setAdminWithdrawals(
-            getArray(adminWithdrawalResult, ["withdrawals"])
-          );
-        } else {
-          setDashboard({});
-          setMembers([]);
-          setAdminWithdrawals([]);
+          if (adminResults[2].status === "fulfilled") {
+            setAdminWithdrawals(getArray(adminResults[2].value));
+          }
         }
       } catch (err) {
         const message = getErrorMessage(err);
 
-        setError(message);
-
         if (
-          /token|unauthorized|unauthenticated|đăng nhập|không có quyền/i.test(
-            message
-          )
+          message.toLowerCase().includes("token") ||
+          message.toLowerCase().includes("unauthorized") ||
+          message.includes("401")
         ) {
           logout();
+        } else {
+          setError(message);
         }
       } finally {
         setLoading(false);
@@ -290,116 +264,99 @@ function App() {
 
   useEffect(() => {
     if (token) {
-      load(token);
-    } else {
-      setLoading(false);
+      loadData(token);
     }
-  }, [token, load]);
+  }, [token, loadData]);
 
-  async function run(
-    action,
-    successMessage = "Thao tác thành công."
-  ) {
-    setBusy(true);
-    setError("");
-    setNotice("");
-
-    try {
-      await action();
-
-      setNotice(successMessage);
-
-      if (token) {
-        await load(token);
-      }
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
+  /* -------------------------------------------------------
+     AUTHENTICATION
+     Important: backend receives identity, not email.
+  ------------------------------------------------------- */
 
   async function submitAuth(event) {
     event.preventDefault();
 
-    const form = new FormData(event.currentTarget);
-
-    const username = String(
-      form.get("username") || ""
-    ).trim();
-
-    const password = String(
-      form.get("password") || ""
-    );
-
-    const email = String(
-      form.get("email") || ""
-    ).trim();
-
-    if (username.length < 3) {
-      setError("Tên tài khoản phải có ít nhất 3 ký tự.");
-      return;
-    }
-
-    if (password.length < 6) {
-      setError("Mật khẩu phải có ít nhất 6 ký tự.");
-      return;
-    }
-
-    const payload = {
-      username,
-      password,
-    };
-
-    if (authMode === "register" && email) {
-      payload.email = email;
-    }
-
     setBusy(true);
     setError("");
     setNotice("");
 
+    const form = new FormData(event.currentTarget);
+
+    const password = String(form.get("password") || "");
+
+    let payload;
+    let endpoint;
+
+    if (authMode === "login") {
+      payload = {
+        identity: String(form.get("identity") || "").trim(),
+        password,
+      };
+
+      endpoint = "/auth/login";
+
+      if (!payload.identity || !payload.password) {
+        setError("Vui lòng nhập tên tài khoản và mật khẩu.");
+        setBusy(false);
+        return;
+      }
+    } else {
+      payload = {
+        username: String(form.get("username") || "").trim(),
+        email: String(form.get("email") || "").trim(),
+        password,
+      };
+
+      endpoint = "/auth/register";
+
+      if (!payload.username || !payload.email || !payload.password) {
+        setError("Vui lòng nhập đầy đủ thông tin đăng ký.");
+        setBusy(false);
+        return;
+      }
+
+      if (payload.username.length < 3) {
+        setError("Tên tài khoản phải có ít nhất 3 ký tự.");
+        setBusy(false);
+        return;
+      }
+
+      if (payload.password.length < 6) {
+        setError("Mật khẩu phải có ít nhất 6 ký tự.");
+        setBusy(false);
+        return;
+      }
+    }
+
     try {
-      const result = await request(
-        authMode === "login"
-          ? "/auth/login"
-          : "/auth/register",
-        "",
-        {
-          method: "POST",
-          body: JSON.stringify(payload),
-        }
-      );
+      const result = await request(endpoint, "", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
 
       const newToken =
         result.token ||
         result.accessToken ||
-        result.data?.token;
+        result.data?.token ||
+        result.data?.accessToken;
 
       if (!newToken) {
         throw new Error(
-          "Máy chủ không trả về token đăng nhập. Hãy kiểm tra API Backend."
+          result.message ||
+            "Máy chủ không trả về token đăng nhập. Hãy kiểm tra backend."
         );
       }
 
-      localStorage.setItem(
-        "earnhub_token",
-        newToken
-      );
-
-      setUser(
-        result.user ||
-          result.data?.user ||
-          null
-      );
-
+      saveToken(newToken);
       setToken(newToken);
-      setPage("overview");
+
       setNotice(
         authMode === "login"
-          ? "Đăng nhập thành công."
-          : "Đăng ký thành công."
+          ? "Đăng nhập thành công!"
+          : "Đăng ký thành công!"
       );
+
+      setPage("overview");
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -407,1612 +364,1516 @@ function App() {
     }
   }
 
-  async function createTask(event) {
+  /* -------------------------------------------------------
+     MEMBER ACTIONS
+  ------------------------------------------------------- */
+
+  async function submitWithdrawal(event) {
     event.preventDefault();
 
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
+    const form = new FormData(event.currentTarget);
+    const amount = Number(form.get("amount"));
+    const method = String(form.get("method") || "").trim();
+    const account = String(form.get("account") || "").trim();
 
-    const payload = Object.fromEntries(
-      form.entries()
-    );
+    if (!amount || amount <= 0 || !method || !account) {
+      setError("Vui lòng nhập đầy đủ thông tin rút tiền.");
+      return;
+    }
 
-    payload.points = Number(payload.points || 0);
+    setBusy(true);
+    setError("");
+    setNotice("");
 
-    await run(async () => {
+    try {
+      await request("/withdrawals", token, {
+        method: "POST",
+        body: JSON.stringify({ amount, method, account }),
+      });
+
+      setNotice("Đã gửi yêu cầu rút tiền.");
+      event.currentTarget.reset();
+      await loadData(token);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* -------------------------------------------------------
+     ADMIN ACTIONS
+  ------------------------------------------------------- */
+
+  async function adminUpdateUser(userId, action, value) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+
+    try {
+      await request(`/admin/users/${userId}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ action, value }),
+      });
+
+      setNotice("Đã cập nhật thành viên.");
+      await loadData(token);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function adminProcessWithdrawal(id, status) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+
+    try {
+      await request(`/admin/withdrawals/${id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+
+      setNotice("Đã cập nhật yêu cầu rút tiền.");
+      await loadData(token);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function adminCreateTask(event) {
+    event.preventDefault();
+
+    const form = new FormData(event.currentTarget);
+    const payload = {
+      title: String(form.get("title") || "").trim(),
+      description: String(form.get("description") || "").trim(),
+      reward: Number(form.get("reward")),
+      url: String(form.get("url") || "").trim(),
+    };
+
+    if (!payload.title || !payload.reward || payload.reward <= 0) {
+      setError("Vui lòng nhập tên nhiệm vụ và phần thưởng hợp lệ.");
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+
+    try {
       await request("/admin/tasks", token, {
         method: "POST",
         body: JSON.stringify(payload),
       });
 
-      formElement.reset();
-    }, "Đã tạo nhiệm vụ DEMO.");
-  }
-
-  async function submitWithdrawal(event) {
-    event.preventDefault();
-
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
-
-    const payload = Object.fromEntries(
-      form.entries()
-    );
-
-    payload.points = Number(payload.points || 0);
-
-    if (payload.points < 1) {
-      setError("Số điểm rút không hợp lệ.");
-      return;
+      setNotice("Đã tạo nhiệm vụ.");
+      event.currentTarget.reset();
+      await loadData(token);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusy(false);
     }
-
-    await run(async () => {
-      await request("/withdrawals", token, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-
-      formElement.reset();
-    }, "Đã gửi yêu cầu rút tiền.");
   }
 
-  async function adjustPoints(member) {
-    const raw = window.prompt(
-      `Nhập số điểm muốn điều chỉnh cho ${member.username}. Dùng số âm để trừ điểm:`
-    );
+  const filteredMembers = useMemo(() => {
+    const value = query.trim().toLowerCase();
 
-    if (raw === null || raw.trim() === "") return;
+    if (!value) return members;
 
-    const points = Number(raw);
-
-    if (!Number.isFinite(points) || points === 0) {
-      setError("Số điểm không hợp lệ.");
-      return;
-    }
-
-    await run(
-      () =>
-        request(
-          `/admin/users/${member._id}/points`,
-          token,
-          {
-            method: "PATCH",
-            body: JSON.stringify({ points }),
-          }
-        ),
-      "Đã cập nhật số dư thành viên."
-    );
-  }
-
-  async function resetPassword(member) {
-    const password = window.prompt(
-      `Nhập mật khẩu mới cho ${member.username} (tối thiểu 6 ký tự):`
-    );
-
-    if (password === null) return;
-
-    if (password.length < 6) {
-      setError("Mật khẩu phải có ít nhất 6 ký tự.");
-      return;
-    }
-
-    await run(
-      () =>
-        request(
-          `/admin/users/${member._id}/password`,
-          token,
-          {
-            method: "PATCH",
-            body: JSON.stringify({ password }),
-          }
-        ),
-      "Đã đổi mật khẩu thành viên."
-    );
-  }
-
-  async function toggleMember(member) {
-    const nextStatus =
-      member.status === "blocked"
-        ? "active"
-        : "blocked";
-
-    await run(
-      () =>
-        request(
-          `/admin/users/${member._id}/status`,
-          token,
-          {
-            method: "PATCH",
-            body: JSON.stringify({
-              status: nextStatus,
-            }),
-          }
-        ),
-      nextStatus === "blocked"
-        ? "Đã khóa tài khoản."
-        : "Đã mở khóa tài khoản."
-    );
-  }
-
-  async function processWithdrawal(item, status) {
-    await run(
-      () =>
-        request(
-          `/admin/withdrawals/${item._id}`,
-          token,
-          {
-            method: "PATCH",
-            body: JSON.stringify({ status }),
-          }
-        ),
-      status === "paid"
-        ? "Đã xác nhận thanh toán."
-        : "Đã từ chối yêu cầu."
-    );
-  }
-
-  const filteredUsers = useMemo(() => {
-    const term = query.trim().toLowerCase();
-
-    if (!term) return members;
-
-    return members.filter((member) =>
-      [
+    return members.filter((member) => {
+      const text = [
         member.username,
         member.email,
-        member.status,
         member.role,
+        member.status,
       ]
         .filter(Boolean)
-        .some((value) =>
-          String(value).toLowerCase().includes(term)
-        )
-    );
+        .join(" ")
+        .toLowerCase();
+
+      return text.includes(value);
+    });
   }, [members, query]);
 
-  const adminNav = [
-    {
-      id: "overview",
-      label: "Tổng quan",
-      icon: LayoutDashboard,
-    },
-    {
-      id: "members",
-      label: "Thành viên",
-      icon: Users,
-    },
-    {
-      id: "withdrawals",
-      label: "Yêu cầu rút tiền",
-      icon: ArrowDownToLine,
-    },
-    {
-      id: "tasks",
-      label: "Quản lý nhiệm vụ",
-      icon: ClipboardList,
-    },
+  /* -------------------------------------------------------
+     AUTH SCREEN
+  ------------------------------------------------------- */
+
+  if (!token || !user) {
+    return (
+      <AuthScreen
+        authMode={authMode}
+        setAuthMode={setAuthMode}
+        submitAuth={submitAuth}
+        busy={busy}
+        error={error}
+        notice={notice}
+      />
+    );
+  }
+
+  /* -------------------------------------------------------
+     MAIN DASHBOARD
+  ------------------------------------------------------- */
+
+  const navItems = [
+    { id: "overview", label: "Tổng quan", icon: LayoutDashboard },
+    { id: "tasks", label: "Nhiệm vụ", icon: ClipboardList },
+    { id: "offerwall", label: "Offerwall", icon: Gift },
+    { id: "wallet", label: "Ví của tôi", icon: Wallet },
+    { id: "withdraw", label: "Rút tiền", icon: ArrowDownToLine },
+    { id: "history", label: "Lịch sử", icon: History },
+    ...(isAdmin
+      ? [
+          { id: "members", label: "Thành viên", icon: Users },
+          {
+            id: "adminWithdrawals",
+            label: "Quản lý rút tiền",
+            icon: ShieldCheck,
+          },
+          {
+            id: "adminTasks",
+            label: "Quản lý nhiệm vụ",
+            icon: Settings,
+          },
+        ]
+      : []),
   ];
 
-  const memberNav = [
-    {
-      id: "overview",
-      label: "Tổng quan",
-      icon: LayoutDashboard,
-    },
-    {
-      id: "offerwall",
-      label: "Offerwall kiếm thưởng",
-      icon: Activity,
-    },
-    {
-      id: "tasks",
-      label: "Nhiệm vụ DEMO",
-      icon: ClipboardList,
-    },
-    {
-      id: "wallet",
-      label: "Ví của tôi",
-      icon: Wallet,
-    },
-    {
-      id: "withdraw",
-      label: "Rút tiền",
-      icon: ArrowDownToLine,
-    },
-  ];
-
-  const navItems = isAdmin
-    ? adminNav
-    : memberNav;
-
-  function navigate(nextPage) {
-    setPage(nextPage);
+  function changePage(id) {
+    setPage(id);
     setMobileOpen(false);
     setError("");
     setNotice("");
   }
 
-  if (!token) {
-    return (
-      <div className="auth-screen">
-        <div className="auth-card">
-          <div className="brand-mark">
-            <CircleDollarSign size={30} />
-          </div>
-
-          <h1>EarnHub Pro</h1>
-
-          <p className="muted">
-            Nền tảng nhiệm vụ và phần thưởng trực tuyến
-          </p>
-
-          <div className="auth-switch">
-            <button
-              type="button"
-              className={
-                authMode === "login" ? "active" : ""
-              }
-              onClick={() => {
-                setAuthMode("login");
-                setError("");
-                setNotice("");
-              }}
-            >
-              Đăng nhập
-            </button>
-
-            <button
-              type="button"
-              className={
-                authMode === "register" ? "active" : ""
-              }
-              onClick={() => {
-                setAuthMode("register");
-                setError("");
-                setNotice("");
-              }}
-            >
-              Đăng ký
-            </button>
-          </div>
-
-          <form
-            className="stack-form"
-            onSubmit={submitAuth}
-          >
-            <label>
-              Tên tài khoản
-
-              <input
-                name="username"
-                type="text"
-                minLength="3"
-                maxLength="24"
-                autoComplete="username"
-                required
-                placeholder="Nhập tên tài khoản"
-              />
-            </label>
-
-            {authMode === "register" && (
-              <label>
-                Email (không bắt buộc)
-
-                <input
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                />
-              </label>
-            )}
-
-            <label>
-              Mật khẩu
-
-              <div className="password-wrap">
-                <input
-                  name="password"
-                  type={
-                    showPassword
-                      ? "text"
-                      : "password"
-                  }
-                  minLength="6"
-                  autoComplete={
-                    authMode === "login"
-                      ? "current-password"
-                      : "new-password"
-                  }
-                  required
-                  placeholder="Nhập mật khẩu"
-                />
-
-                <button
-                  type="button"
-                  className="password-toggle"
-                  onClick={() =>
-                    setShowPassword((value) => !value)
-                  }
-                  aria-label={
-                    showPassword
-                      ? "Ẩn mật khẩu"
-                      : "Hiện mật khẩu"
-                  }
-                >
-                  {showPassword
-                    ? <EyeOff size={18} />
-                    : <Eye size={18} />}
-                </button>
-              </div>
-            </label>
-
-            {error && (
-              <div className="alert error">
-                <AlertCircle size={17} />
-                <span>{error}</span>
-              </div>
-            )}
-
-            {notice && (
-              <div className="alert success">
-                <CheckCircle2 size={17} />
-                <span>{notice}</span>
-              </div>
-            )}
-
-            <button
-              className="btn primary auth-submit"
-              type="submit"
-              disabled={busy}
-            >
-              {busy
-                ? "Đang xử lý..."
-                : authMode === "login"
-                  ? "Đăng nhập"
-                  : "Tạo tài khoản"}
-            </button>
-          </form>
-
-          <p className="auth-footer">
-            Bảo mật tài khoản · EarnHub Pro
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (loading && !user) {
-    return (
-      <div className="loading-screen">
-        <div className="loader" />
-        Đang tải EarnHub Pro...
-      </div>
-    );
-  }
-
   return (
-    <div className="app-shell">
-      <aside
-        className={`sidebar ${
-          mobileOpen ? "open" : ""
-        }`}
-      >
-        <div className="sidebar-brand">
-          <div className="brand-mark">
-            <CircleDollarSign size={25} />
-          </div>
+    <div className="eh-app">
+      <style>{APP_CSS}</style>
 
-          <div className="sidebar-brand-text">
-            <b>EarnHub Pro</b>
-            <small>Reward platform</small>
-          </div>
+      {mobileOpen && (
+        <button
+          className="eh-mobile-overlay"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Đóng menu"
+        />
+      )}
 
+      <aside className={`eh-sidebar ${mobileOpen ? "eh-sidebar-open" : ""}`}>
+        <div className="eh-brand">
+          <div className="eh-brand-icon">
+            <Coins size={25} />
+          </div>
+          <div>
+            <strong>EarnHub</strong>
+            <span>PRO REWARDS</span>
+          </div>
           <button
-            className="icon-btn mobile-close"
+            className="eh-icon-button eh-close-menu"
             onClick={() => setMobileOpen(false)}
             aria-label="Đóng menu"
           >
-            <X />
+            <X size={19} />
           </button>
         </div>
 
-        <div className="sidebar-user">
-          <div className="avatar">
-            {(user?.username || "U")
-              .slice(0, 1)
-              .toUpperCase()}
-          </div>
+        <div className="eh-sidebar-label">MENU CHÍNH</div>
 
-          <div className="sidebar-user-info">
-            <b>{user?.username || "Thành viên"}</b>
-            <small>
-              {isAdmin
-                ? "Quản trị viên"
-                : "Thành viên"}
-            </small>
-          </div>
-        </div>
-
-        <nav className="side-nav">
-          <span className="nav-caption">
-            MENU CHÍNH
-          </span>
-
+        <nav className="eh-nav">
           {navItems.map((item) => {
             const Icon = item.icon;
 
             return (
               <button
                 key={item.id}
-                className={`nav-item ${
+                className={`eh-nav-item ${
                   page === item.id ? "active" : ""
                 }`}
-                onClick={() => navigate(item.id)}
+                onClick={() => changePage(item.id)}
               >
-                <Icon size={18} />
+                <Icon size={19} />
                 <span>{item.label}</span>
               </button>
             );
           })}
         </nav>
 
-        <button
-          className="logout-btn"
-          onClick={logout}
-        >
-          <LogOut size={18} />
-          Đăng xuất
-        </button>
-      </aside>
-
-      {mobileOpen && (
-        <button
-          className="mobile-backdrop"
-          onClick={() => setMobileOpen(false)}
-          aria-label="Đóng menu"
-        />
-      )}
-
-      <main className="main-area">
-        <header className="topbar">
-          <button
-            className="icon-btn mobile-menu"
-            onClick={() => setMobileOpen(true)}
-            aria-label="Mở menu"
-          >
-            <Menu />
-          </button>
-
-          <div className="topbar-title">
-            <span className="topbar-eyebrow">
-              EARNHUB PRO
-            </span>
-
-            <h1>
-              {navItems.find(
-                (item) => item.id === page
-              )?.label || "Tổng quan"}
-            </h1>
+        <div className="eh-sidebar-bottom">
+          <div className="eh-sidebar-user">
+            <div className="eh-avatar">
+              {(user.username || user.email || "U")
+                .charAt(0)
+                .toUpperCase()}
+            </div>
+            <div className="eh-user-info">
+              <strong>{user.username || "Thành viên"}</strong>
+              <span>{isAdmin ? "Quản trị viên" : "Thành viên"}</span>
+            </div>
           </div>
 
-          <div className="topbar-right">
-            <span className="user-chip">
-              <ShieldCheck size={16} />
-              {user?.username}
-            </span>
+          <button className="eh-logout" onClick={logout}>
+            <LogOut size={18} />
+            Đăng xuất
+          </button>
+        </div>
+      </aside>
 
+      <main className="eh-main">
+        <header className="eh-topbar">
+          <div className="eh-topbar-left">
             <button
-              className="icon-btn"
-              onClick={() => load(token)}
-              disabled={loading}
-              aria-label="Làm mới"
-              title="Làm mới dữ liệu"
+              className="eh-icon-button eh-menu-button"
+              onClick={() => setMobileOpen(true)}
+              aria-label="Mở menu"
             >
-              <RefreshCw
-                size={18}
-                className={
-                  loading ? "spin" : ""
-                }
-              />
+              <Menu size={21} />
             </button>
+
+            <div>
+              <div className="eh-page-eyebrow">EARNHUB PRO</div>
+              <h1>{getPageTitle(page)}</h1>
+            </div>
+          </div>
+
+          <div className="eh-topbar-right">
+            <div className="eh-top-balance">
+              <Wallet size={17} />
+              <span>{money(wallet.points)} điểm</span>
+            </div>
+            <button
+              className="eh-icon-button"
+              onClick={() => loadData(token)}
+              title="Tải lại dữ liệu"
+            >
+              <RefreshCw size={18} className={loading ? "eh-spin" : ""} />
+            </button>
+            <div className="eh-top-avatar">
+              {(user.username || "U").charAt(0).toUpperCase()}
+            </div>
           </div>
         </header>
 
-        {(error || notice) && (
-          <div
-            className={`global-message ${
-              error ? "error" : "success"
-            }`}
-          >
-            {error
-              ? <AlertCircle size={17} />
-              : <CheckCircle2 size={17} />}
-
-            <span>{error || notice}</span>
-
-            <button
-              onClick={() => {
-                setError("");
-                setNotice("");
-              }}
-              aria-label="Đóng"
-            >
-              <X size={16} />
-            </button>
-          </div>
-        )}
-
-        {page === "overview" && isAdmin && (
-          <>
-            <div className="page-intro">
-              <div>
-                <h2>Bảng điều khiển quản trị</h2>
-                <p className="muted">
-                  Theo dõi hoạt động và quản lý EarnHub Pro.
-                </p>
-              </div>
+        <section className="eh-content">
+          {error && (
+            <div className="eh-alert eh-alert-error">
+              <AlertCircle size={18} />
+              <span>{error}</span>
+              <button onClick={() => setError("")}>
+                <X size={16} />
+              </button>
             </div>
+          )}
 
-            <div className="stats-grid">
-              <Stat
-                icon={Users}
-                label="Thành viên"
-                value={money(
-                  dashboard.totalUsers ??
-                    dashboard.usersCount
-                )}
-                hint="Tổng tài khoản"
-              />
-
-              <Stat
-                icon={Wallet}
-                label="Tổng điểm"
-                value={money(dashboard.totalPoints)}
-                hint="Số điểm trong hệ thống"
-              />
-
-              <Stat
-                icon={ArrowDownToLine}
-                label="Yêu cầu rút"
-                value={money(
-                  dashboard.pendingWithdrawals
-                )}
-                hint="Đang chờ xử lý"
-              />
-
-              <Stat
-                icon={Activity}
-                label="Nhiệm vụ"
-                value={money(dashboard.totalTasks)}
-                hint="Nhiệm vụ hiện có"
-              />
+          {notice && (
+            <div className="eh-alert eh-alert-success">
+              <CheckCircle2 size={18} />
+              <span>{notice}</span>
+              <button onClick={() => setNotice("")}>
+                <X size={16} />
+              </button>
             </div>
+          )}
 
-            <div className="panel">
-              <h3>Quản lý nhanh</h3>
-
-              <div className="quick-grid">
-                <Quick
-                  icon={Users}
-                  title="Thành viên"
-                  desc="Quản lý tài khoản và số dư"
-                  onClick={() => navigate("members")}
-                />
-
-                <Quick
-                  icon={ArrowDownToLine}
-                  title="Rút tiền"
-                  desc="Duyệt yêu cầu rút tiền"
-                  onClick={() =>
-                    navigate("withdrawals")
-                  }
-                />
-
-                <Quick
-                  icon={ClipboardList}
-                  title="Nhiệm vụ"
-                  desc="Tạo nhiệm vụ DEMO"
-                  onClick={() => navigate("tasks")}
-                />
-              </div>
+          {loading && (
+            <div className="eh-loading">
+              <RefreshCw size={16} className="eh-spin" />
+              Đang tải dữ liệu...
             </div>
-          </>
-        )}
-
-        {page === "overview" && !isAdmin && (
-          <>
-            <div className="page-intro">
-              <div>
-                <h2>
-                  Xin chào, {user?.username || "bạn"}!
-                </h2>
-
-                <p className="muted">
-                  Hoàn thành nhiệm vụ để tích lũy phần thưởng.
-                </p>
-              </div>
-            </div>
-
-            <div className="balance-card">
-              <div>
-                <span>SỐ DƯ HIỆN TẠI</span>
-
-                <h2>
-                  {money(wallet.balanceVND)}
-                  <small> VNĐ</small>
-                </h2>
-
-                <p>{money(wallet.points)} điểm</p>
-              </div>
-
-              <div className="balance-icon">
-                <Wallet size={30} />
-              </div>
-            </div>
-
-            <div className="quick-grid">
-              <Quick
-                icon={Activity}
-                title="Offerwall kiếm thưởng"
-                desc="Nhiệm vụ, offers và khảo sát từ đối tác"
-                onClick={() => navigate("offerwall")}
-              />
-
-              <Quick
-                icon={Wallet}
-                title="Ví của tôi"
-                desc="Xem số dư và lịch sử giao dịch"
-                onClick={() => navigate("wallet")}
-              />
-
-              <Quick
-                icon={ArrowDownToLine}
-                title="Rút tiền"
-                desc="Tạo yêu cầu rút tiền"
-                onClick={() => navigate("withdraw")}
-              />
-            </div>
-
-            <div className="panel">
-              <div className="panel-head">
-                <div>
-                  <h3>Giao dịch gần đây</h3>
-                  <p className="muted">
-                    Các giao dịch mới nhất của bạn.
-                  </p>
-                </div>
-              </div>
-
-              <TransactionTable
-                rows={(
-                  wallet.transactions || []
-                ).slice(0, 5)}
-              />
-            </div>
-          </>
-        )}
-
-        {page === "members" && isAdmin && (
-          <>
-            <div className="page-intro">
-              <div>
-                <h2>Quản lý thành viên</h2>
-                <p className="muted">
-                  Tìm kiếm, điều chỉnh điểm và quản lý tài khoản.
-                </p>
-              </div>
-            </div>
-
-            <div className="panel">
-              <div className="panel-head members-head">
-                <h3>
-                  Danh sách thành viên ({members.length})
-                </h3>
-
-                <div className="search-box">
-                  <Search size={17} />
-
-                  <input
-                    value={query}
-                    onChange={(event) =>
-                      setQuery(event.target.value)
-                    }
-                    placeholder="Tìm tên hoặc email..."
-                  />
-                </div>
-              </div>
-
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Thành viên</th>
-                      <th>Email</th>
-                      <th>Vai trò</th>
-                      <th>Trạng thái</th>
-                      <th>Thao tác</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {filteredUsers.map((member) => (
-                      <tr key={member._id}>
-                        <td>
-                          <b>{member.username}</b>
-                        </td>
-
-                        <td>{member.email || "—"}</td>
-                        <td>{member.role}</td>
-
-                        <td>
-                          <span
-                            className={`status-pill ${
-                              member.status === "blocked"
-                                ? "blocked"
-                                : "live"
-                            }`}
-                          >
-                            {member.status === "blocked"
-                              ? "Đã khóa"
-                              : "Hoạt động"}
-                          </span>
-                        </td>
-
-                        <td>
-                          <div className="action-row">
-                            <button
-                              className="icon-btn"
-                              title="Cộng điểm"
-                              onClick={() =>
-                                adjustPoints(member)
-                              }
-                            >
-                              <Plus size={16} />
-                            </button>
-
-                            <button
-                              className="icon-btn"
-                              title="Đổi mật khẩu"
-                              onClick={() =>
-                                resetPassword(member)
-                              }
-                            >
-                              <KeyRound size={16} />
-                            </button>
-
-                            <button
-                              className="icon-btn"
-                              title={
-                                member.status === "blocked"
-                                  ? "Mở khóa"
-                                  : "Khóa"
-                              }
-                              onClick={() =>
-                                toggleMember(member)
-                              }
-                            >
-                              {member.status === "blocked"
-                                ? <Unlock size={16} />
-                                : <Lock size={16} />}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-
-                {filteredUsers.length === 0 && (
-                  <div className="empty">
-                    Không tìm thấy thành viên.
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-
-        {page === "withdrawals" && isAdmin && (
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <h3>Quản lý yêu cầu rút tiền</h3>
-                <p className="muted">
-                  Kiểm tra và xử lý yêu cầu của thành viên.
-                </p>
-              </div>
-            </div>
-
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Thành viên</th>
-                    <th>Số tiền</th>
-                    <th>Ngân hàng</th>
-                    <th>Tài khoản</th>
-                    <th>Trạng thái</th>
-                    <th>Thao tác</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {adminWithdrawals.map((item) => (
-                    <tr key={item._id}>
-                      <td>
-                        {item.user?.username ||
-                          item.username ||
-                          "—"}
-                      </td>
-
-                      <td>
-                        {money(item.amountVND)} VNĐ
-                      </td>
-
-                      <td>{item.bankName}</td>
-
-                      <td>
-                        <div>
-                          {item.bankAccount}
-                          <small>{item.bankHolder}</small>
-                        </div>
-                      </td>
-
-                      <td>
-                        <span
-                          className={`status-pill ${item.status}`}
-                        >
-                          {item.status}
-                        </span>
-                      </td>
-
-                      <td>
-                        {item.status === "pending" ? (
-                          <div className="action-row">
-                            <button
-                              className="btn small primary"
-                              disabled={busy}
-                              onClick={() =>
-                                processWithdrawal(
-                                  item,
-                                  "paid"
-                                )
-                              }
-                            >
-                              <CheckCircle2 size={15} />
-                              Duyệt
-                            </button>
-
-                            <button
-                              className="btn small danger"
-                              disabled={busy}
-                              onClick={() =>
-                                processWithdrawal(
-                                  item,
-                                  "rejected"
-                                )
-                              }
-                            >
-                              <XCircle size={15} />
-                              Từ chối
-                            </button>
-                          </div>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {adminWithdrawals.length === 0 && (
-                <div className="empty">
-                  Chưa có yêu cầu rút tiền.
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {page === "tasks" && isAdmin && (
-          <>
-            <div className="page-intro">
-              <div>
-                <h2>Quản lý nhiệm vụ</h2>
-                <p className="muted">
-                  Nhiệm vụ tạo tại đây là DEMO, không tự cộng điểm.
-                </p>
-              </div>
-            </div>
-
-            <div className="panel form-panel">
-              <h3>Tạo nhiệm vụ mới</h3>
-
-              <form
-                className="task-form"
-                onSubmit={createTask}
-              >
-                <label>
-                  Tên nhiệm vụ
-
-                  <input
-                    name="title"
-                    required
-                    placeholder="Ví dụ: Khảo sát trải nghiệm"
-                  />
-                </label>
-
-                <label>
-                  Danh mục
-
-                  <select name="category">
-                    <option>Khảo sát</option>
-                    <option>Xem quảng cáo</option>
-                    <option>Ứng dụng</option>
-                    <option>Khác</option>
-                  </select>
-                </label>
-
-                <label>
-                  Điểm hiển thị
-
-                  <input
-                    name="points"
-                    type="number"
-                    min="0"
-                    defaultValue="0"
-                  />
-                </label>
-
-                <label className="wide">
-                  Mô tả
-
-                  <textarea
-                    name="description"
-                    rows="3"
-                    placeholder="Mô tả nhiệm vụ..."
-                  />
-                </label>
-
-                <button
-                  className="btn primary"
-                  type="submit"
-                  disabled={busy}
-                >
-                  <Plus size={16} />
-                  Tạo nhiệm vụ DEMO
-                </button>
-              </form>
-            </div>
-
-            <div className="panel">
-              <h3>Nhiệm vụ hiện tại</h3>
-
-              <div className="task-list">
-                {tasks.map((task) => (
-                  <div
-                    className="task-row"
-                    key={task._id}
-                  >
-                    <div>
-                      <b>{task.title}</b>
-                      <small>
-                        {task.category} ·{" "}
-                        {money(task.points)} điểm ·{" "}
-                        {task.isDemo ? "DEMO" : "Đối tác"}
-                      </small>
-                    </div>
-
-                    <span
-                      className={`status-pill ${
-                        task.active ? "live" : "blocked"
-                      }`}
-                    >
-                      {task.active
-                        ? "Đang bật"
-                        : "Đã tắt"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              {tasks.length === 0 && (
-                <div className="empty">
-                  Chưa có nhiệm vụ nào.
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {page === "offerwall" && !isAdmin && (
-          <OfferwallPanel token={token} />
-        )}
-
-        {page === "tasks" && !isAdmin && (
-          <>
-            <div className="page-intro">
-              <div>
-                <h2>Nhiệm vụ DEMO</h2>
-                <p className="muted">
-                  Nhiệm vụ demo chưa phát sinh điểm thưởng.
-                </p>
-              </div>
-            </div>
-
-            <div className="task-grid">
-              {tasks.map((task) => (
-                <div
-                  className="task-card"
-                  key={task._id}
-                >
-                  <div className="task-icon">
-                    <ClipboardList />
-                  </div>
-
-                  <span className="status-pill">
-                    {task.category}
-                  </span>
-
-                  <h3>{task.title}</h3>
-
-                  <p>
-                    {task.description ||
-                      "Thông tin nhiệm vụ đang được cập nhật."}
-                  </p>
-
-                  <div className="task-bottom">
-                    <b>{money(task.points)} điểm</b>
-                    <span className="status-pill pending">
-                      DEMO
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {tasks.length === 0 && (
-              <div className="empty">
-                Chưa có nhiệm vụ nào.
-              </div>
-            )}
-          </>
-        )}
-
-        {page === "wallet" && !isAdmin && (
-          <>
-            <div className="balance-card compact">
-              <div>
-                <span>SỐ DƯ HIỆN TẠI</span>
-
-                <h2>
-                  {money(wallet.balanceVND)}
-                  <small> VNĐ</small>
-                </h2>
-
-                <p>{money(wallet.points)} điểm</p>
-              </div>
-
-              <div className="balance-icon">
-                <Wallet />
-              </div>
-            </div>
-
-            <div className="panel">
-              <div className="panel-head">
-                <div>
-                  <h3>Lịch sử giao dịch</h3>
-                  <p className="muted">
-                    Tối đa 30 giao dịch gần nhất.
-                  </p>
-                </div>
-              </div>
-
-              <TransactionTable
-                rows={wallet.transactions || []}
-              />
-            </div>
-          </>
-        )}
-
-        {page === "withdraw" && !isAdmin && (
-          <>
-            <div className="page-intro">
-              <div>
-                <h2>Tạo yêu cầu rút tiền</h2>
-
-                <p className="muted">
-                  Số dư hiện tại:{" "}
-                  {money(wallet.balanceVND)} VNĐ (
-                  {money(wallet.points)} điểm).
-                </p>
-              </div>
-            </div>
-
-            <div className="split-grid">
-              <div className="panel form-panel">
-                <h3>Thông tin nhận tiền</h3>
-
-                <form
-                  className="stack-form"
-                  onSubmit={submitWithdrawal}
-                >
-                  <label>
-                    Số điểm muốn rút
-
-                    <input
-                      name="points"
-                      type="number"
-                      min="1"
-                      step="1"
-                      required
-                      placeholder="Ví dụ: 10000"
-                    />
-                  </label>
-
-                  <label>
-                    Ngân hàng
-
-                    <input
-                      name="bankName"
-                      required
-                      placeholder="Ví dụ: MBBank"
-                    />
-                  </label>
-
-                  <label>
-                    Số tài khoản
-
-                    <input
-                      name="bankAccount"
-                      required
-                      placeholder="Số tài khoản nhận"
-                    />
-                  </label>
-
-                  <label>
-                    Chủ tài khoản
-
-                    <input
-                      name="bankHolder"
-                      required
-                      placeholder="Tên chủ tài khoản"
-                    />
-                  </label>
-
-                  <button
-                    className="btn primary"
-                    disabled={busy}
-                    type="submit"
-                  >
-                    <ArrowDownToLine size={16} />
-                    Gửi yêu cầu rút tiền
-                  </button>
-                </form>
-
-                <p className="hint">
-                  Kiểm tra số dư và thông tin ngân hàng trước khi gửi.
-                  Quy tắc quy đổi điểm do Backend quyết định.
-                </p>
-              </div>
-
-              <div className="panel">
-                <h3>Lịch sử yêu cầu</h3>
-
-                {withdrawals.map((item) => (
-                  <div
-                    className="withdraw-row"
-                    key={item._id}
-                  >
-                    <div>
-                      <b>
-                        {money(item.amountVND)}đ
-                      </b>
-
-                      <small>
-                        {item.bankName} ·{" "}
-                        {date(item.createdAt)}
-                      </small>
-                    </div>
-
-                    <span
-                      className={`status-pill ${item.status}`}
-                    >
-                      {item.status === "pending"
-                        ? "Đang chờ"
-                        : item.status === "paid"
-                          ? "Đã chuyển"
-                          : "Đã từ chối"}
-                    </span>
-                  </div>
-                ))}
-
-                {withdrawals.length === 0 && (
-                  <div className="empty">
-                    Chưa có yêu cầu rút tiền.
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
-        )}
+          )}
+
+          {page === "overview" && (
+            <OverviewPage
+              user={user}
+              wallet={wallet}
+              tasks={tasks}
+              withdrawals={withdrawals}
+              dashboard={dashboard}
+              isAdmin={isAdmin}
+              changePage={changePage}
+            />
+          )}
+
+          {page === "tasks" && (
+            <TasksPage tasks={tasks} isAdmin={isAdmin} />
+          )}
+
+          {page === "offerwall" && <OfferwallPage token={token} />}
+
+          {page === "wallet" && (
+            <WalletPage wallet={wallet} changePage={changePage} />
+          )}
+
+          {page === "withdraw" && (
+            <WithdrawPage
+              wallet={wallet}
+              withdrawals={withdrawals}
+              submitWithdrawal={submitWithdrawal}
+              busy={busy}
+            />
+          )}
+
+          {page === "history" && (
+            <HistoryPage wallet={wallet} withdrawals={withdrawals} />
+          )}
+
+          {page === "members" && isAdmin && (
+            <MembersPage
+              members={filteredMembers}
+              query={query}
+              setQuery={setQuery}
+              updateUser={adminUpdateUser}
+              busy={busy}
+            />
+          )}
+
+          {page === "adminWithdrawals" && isAdmin && (
+            <AdminWithdrawalsPage
+              withdrawals={adminWithdrawals}
+              processWithdrawal={adminProcessWithdrawal}
+              busy={busy}
+            />
+          )}
+
+          {page === "adminTasks" && isAdmin && (
+            <AdminTasksPage
+              tasks={tasks}
+              createTask={adminCreateTask}
+              busy={busy}
+            />
+          )}
+        </section>
+
+        <footer className="eh-footer">
+          EarnHub Pro © {new Date().getFullYear()} · Nền tảng nhiệm vụ trực tuyến
+        </footer>
       </main>
     </div>
   );
 }
 
-function OfferwallPanel({ token }) {
-  const [activeTab, setActiveTab] = useState("tasks");
+/* =========================================================
+   AUTH SCREEN
+========================================================= */
 
-  const [data, setData] = useState({
-    tasks: [],
-    offers: [],
-    surveys: [],
-  });
-
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [loaded, setLoaded] = useState({});
-
-  const tabs = [
-    { id: "tasks", label: "Nhiệm vụ" },
-    { id: "offers", label: "Offers" },
-    { id: "surveys", label: "Khảo sát" },
-  ];
-
-  const loadTab = useCallback(
-    async (type) => {
-      setLoading(true);
-      setError("");
-
-      try {
-        const result = await request(
-          `/offerwall/${type}`,
-          token
-        );
-
-        const rows = getArray(result, [
-          "tasks",
-          "offers",
-          "surveys",
-        ]);
-
-        setData((previous) => ({
-          ...previous,
-          [type]: rows,
-        }));
-
-        setLoaded((previous) => ({
-          ...previous,
-          [type]: true,
-        }));
-      } catch (err) {
-        setError(getErrorMessage(err));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [token]
-  );
-
-  useEffect(() => {
-    if (!loaded[activeTab]) {
-      loadTab(activeTab);
-    }
-  }, [activeTab, loaded, loadTab]);
-
-  function titleOf(item) {
-    return (
-      item.title ||
-      item.name ||
-      item.offer_name ||
-      "Nhiệm vụ mới"
-    );
-  }
-
-  function descriptionOf(item) {
-    return (
-      item.description ||
-      item.instructions ||
-      item.short_description ||
-      "Mở nhiệm vụ và đọc kỹ yêu cầu của đối tác."
-    );
-  }
-
-  function rewardOf(item) {
-    const amount = Number(
-      item.reward ??
-        item.payout ??
-        item.amount ??
-        0
-    );
-
-    return Number.isFinite(amount)
-      ? amount
-      : 0;
-  }
-
-  function rewardLabel(item) {
-    const currency =
-      item.currency ||
-      item.currency_code ||
-      item.reward_currency ||
-      "";
-
-    const value = rewardOf(item);
-
-    return (
-      value.toLocaleString("en-US", {
-        maximumFractionDigits: 4,
-      }) +
-      (currency ? ` ${currency}` : "")
-    );
-  }
-
-  function openItem(item) {
-    const url = safeExternalUrl(
-      item.url ||
-        item.link ||
-        item.offer_url
-    );
-
-    if (!url) {
-      window.alert(
-        "Nhiệm vụ này chưa có đường dẫn hợp lệ. Vui lòng thử nhiệm vụ khác."
-      );
-      return;
-    }
-
-    // Chỉ mở URL đối tác do API trả về.
-    // Chưa tự cộng thưởng khi người dùng nhấn nút.
-    window.open(
-      url,
-      "_blank",
-      "noopener,noreferrer"
-    );
-  }
-
-  const rows = data[activeTab] || [];
+function AuthScreen({
+  authMode,
+  setAuthMode,
+  submitAuth,
+  busy,
+  error,
+  notice,
+}) {
+  const isLogin = authMode === "login";
 
   return (
-    <section className="offerwall-section">
-      <div className="page-intro">
-        <div>
-          <h2>Nhiệm vụ kiếm thưởng</h2>
+    <div className="eh-auth">
+      <style>{APP_CSS}</style>
 
-          <p className="muted">
-            Nhiệm vụ được cung cấp bởi Offerwall.me.
-            Phần thưởng chỉ được cộng khi đối tác xác nhận
-            hoàn thành và máy chủ nhận Postback hợp lệ.
+      <div className="eh-auth-decoration eh-decoration-one" />
+      <div className="eh-auth-decoration eh-decoration-two" />
+
+      <div className="eh-auth-card">
+        <div className="eh-auth-logo">
+          <div className="eh-brand-icon">
+            <Coins size={27} />
+          </div>
+          <div>
+            <strong>EarnHub Pro</strong>
+            <span>REWARDS PLATFORM</span>
+          </div>
+        </div>
+
+        <div className="eh-auth-heading">
+          <div className="eh-auth-tag">
+            <ShieldCheck size={14} />
+            NỀN TẢNG KIẾM THƯỞNG
+          </div>
+
+          <h1>{isLogin ? "Chào mừng trở lại!" : "Tạo tài khoản mới"}</h1>
+
+          <p>
+            {isLogin
+              ? "Đăng nhập để tiếp tục sử dụng EarnHub Pro."
+              : "Đăng ký để bắt đầu trải nghiệm EarnHub Pro."}
           </p>
         </div>
 
-        <button
-          className="btn subtle"
-          onClick={() => {
-            setLoaded((previous) => ({
-              ...previous,
-              [activeTab]: false,
-            }));
+        {error && (
+          <div className="eh-alert eh-alert-error">
+            <AlertCircle size={17} />
+            <span>{error}</span>
+          </div>
+        )}
 
-            loadTab(activeTab);
-          }}
-          disabled={loading}
-        >
-          <RefreshCw
-            size={16}
-            className={loading ? "spin" : ""}
-          />
+        {notice && (
+          <div className="eh-alert eh-alert-success">
+            <CheckCircle2 size={17} />
+            <span>{notice}</span>
+          </div>
+        )}
 
-          {loading ? "Đang tải..." : "Làm mới"}
-        </button>
-      </div>
-
-      <div className="offerwall-notice">
-        <AlertCircle size={18} />
-
-        <span>
-          Giá trị hiển thị là thông tin do đối tác cung cấp,
-          không phải cam kết số tiền VNĐ sẽ được cộng vào ví.
-        </span>
-      </div>
-
-      <div className="offerwall-tabs">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            className={`btn ${
-              activeTab === tab.id
-                ? "primary"
-                : "subtle"
-            }`}
-            onClick={() => setActiveTab(tab.id)}
-            disabled={loading}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {error && (
-        <div className="alert error">
-          <AlertCircle size={17} />
-          <span>{error}</span>
-
-          <button
-            className="btn small subtle"
-            onClick={() => loadTab(activeTab)}
-          >
-            Thử lại
-          </button>
-        </div>
-      )}
-
-      {loading && (
-        <div className="empty">
-          <div className="loader" />
-          Đang tải dữ liệu từ Offerwall.me...
-        </div>
-      )}
-
-      {!loading && !error && rows.length === 0 && (
-        <div className="empty">
-          <Gift size={30} />
-          <b>Chưa có nhiệm vụ khả dụng</b>
-          <span>
-            Hãy thử làm mới hoặc kiểm tra lại sau.
-          </span>
-        </div>
-      )}
-
-      <div className="task-grid">
-        {!loading &&
-          rows.map((item, index) => (
-            <article
-              className="task-card"
-              key={
-                item.id ||
-                item.offer_id ||
-                item.task_id ||
-                index
-              }
-            >
-              <div className="task-icon">
-                <Activity size={22} />
+        <form className="eh-auth-form" onSubmit={submitAuth}>
+          {isLogin ? (
+            <label className="eh-field">
+              <span>Tên tài khoản hoặc Gmail</span>
+              <div className="eh-input-wrap">
+                <User size={18} />
+                <input
+                  type="text"
+                  name="identity"
+                  placeholder="Nhập tên tài khoản hoặc Gmail"
+                  autoComplete="username"
+                  required
+                />
               </div>
-
-              <span className="status-pill live">
-                Offerwall.me
-              </span>
-
-              <h3>{titleOf(item)}</h3>
-
-              <p>{descriptionOf(item)}</p>
-
-              <div className="offer-reward">
-                <Gift size={17} />
-
-                <div>
-                  <small>Phần thưởng đối tác hiển thị</small>
-                  <b>{rewardLabel(item)}</b>
+            </label>
+          ) : (
+            <>
+              <label className="eh-field">
+                <span>Tên tài khoản</span>
+                <div className="eh-input-wrap">
+                  <User size={18} />
+                  <input
+                    type="text"
+                    name="username"
+                    placeholder="Nhập tên tài khoản"
+                    autoComplete="username"
+                    minLength={3}
+                    required
+                  />
                 </div>
-              </div>
+              </label>
 
-              <div className="task-bottom">
-                <span className="offer-pending">
-                  <Clock size={14} />
-                  Chờ xác nhận
-                </span>
+              <label className="eh-field">
+                <span>Địa chỉ Gmail</span>
+                <div className="eh-input-wrap">
+                  <span className="eh-at">@</span>
+                  <input
+                    type="email"
+                    name="email"
+                    placeholder="example@gmail.com"
+                    autoComplete="email"
+                    required
+                  />
+                </div>
+              </label>
+            </>
+          )}
 
-                <button
-                  className="btn primary"
-                  onClick={() => openItem(item)}
-                >
-                  <ExternalLink size={15} />
-                  Tham gia
-                </button>
-              </div>
-            </article>
-          ))}
+          <label className="eh-field">
+            <span>Mật khẩu</span>
+            <div className="eh-input-wrap">
+              <Lock size={18} />
+              <input
+                type="password"
+                name="password"
+                placeholder="Nhập mật khẩu"
+                autoComplete={isLogin ? "current-password" : "new-password"}
+                minLength={isLogin ? undefined : 6}
+                required
+              />
+            </div>
+          </label>
+
+          <button
+            type="submit"
+            className="eh-primary-button eh-auth-submit"
+            disabled={busy}
+          >
+            {busy ? (
+              <>
+                <RefreshCw size={18} className="eh-spin" />
+                Đang xử lý...
+              </>
+            ) : isLogin ? (
+              <>
+                <KeyRound size={18} />
+                Đăng nhập
+              </>
+            ) : (
+              <>
+                <Plus size={18} />
+                Tạo tài khoản
+              </>
+            )}
+          </button>
+        </form>
+
+        <div className="eh-auth-switch">
+          {isLogin ? "Bạn chưa có tài khoản?" : "Bạn đã có tài khoản?"}
+          <button
+            type="button"
+            onClick={() => setAuthMode(isLogin ? "register" : "login")}
+          >
+            {isLogin ? "Đăng ký ngay" : "Đăng nhập"}
+          </button>
+        </div>
+
+        <div className="eh-auth-security">
+          <ShieldCheck size={15} />
+          Thông tin tài khoản được bảo vệ
+        </div>
       </div>
-    </section>
-  );
-}
-
-function Stat({ icon: Icon, label, value, hint }) {
-  return (
-    <div className="stat-card">
-      <div className="stat-top">
-        <span>{label}</span>
-        <Icon size={19} />
-      </div>
-
-      <strong>{value ?? "—"}</strong>
-      <small>{hint}</small>
     </div>
   );
 }
 
-function Quick({ icon: Icon, title, desc, onClick }) {
-  return (
-    <button
-      className="quick-link"
-      onClick={onClick}
-    >
-      <span>
-        <Icon />
-      </span>
+/* =========================================================
+   OVERVIEW
+========================================================= */
 
-      <div>
-        <b>{title}</b>
-        <small>{desc}</small>
+function OverviewPage({
+  user,
+  wallet,
+  tasks,
+  withdrawals,
+  dashboard,
+  isAdmin,
+  changePage,
+}) {
+  const completedTasks = tasks.filter(
+    (task) =>
+      task.status === "completed" ||
+      task.completed === true ||
+      task.status === "done"
+  ).length;
+
+  return (
+    <>
+      <div className="eh-welcome">
+        <div>
+          <div className="eh-section-tag">DASHBOARD</div>
+          <h2>
+            Xin chào, {user.username || "thành viên"} <span>👋</span>
+          </h2>
+          <p>
+            {isAdmin
+              ? "Chào mừng bạn quay lại khu vực quản trị EarnHub Pro."
+              : "Theo dõi số dư và khám phá các nhiệm vụ mới hôm nay."}
+          </p>
+        </div>
+
+        <div className="eh-welcome-icon">
+          <Gamepad2 size={36} />
+        </div>
       </div>
 
-      <span className="quick-arrow">↗</span>
+      <div className="eh-stat-grid">
+        <StatCard
+          label="Số dư điểm"
+          value={money(wallet.points)}
+          unit="điểm"
+          icon={Coins}
+          tone="purple"
+        />
+
+        <StatCard
+          label="Giá trị ví"
+          value={`${money(wallet.balanceVND)}đ`}
+          unit="Số dư hiện tại"
+          icon={Wallet}
+          tone="blue"
+        />
+
+        <StatCard
+          label="Nhiệm vụ"
+          value={money(tasks.length)}
+          unit="Nhiệm vụ khả dụng"
+          icon={ClipboardList}
+          tone="orange"
+        />
+
+        <StatCard
+          label="Yêu cầu rút"
+          value={money(withdrawals.length)}
+          unit="Lịch sử rút tiền"
+          icon={ArrowDownToLine}
+          tone="green"
+        />
+      </div>
+
+      {isAdmin && (
+        <div className="eh-admin-summary">
+          <div className="eh-section-heading">
+            <div>
+              <div className="eh-section-tag">ADMINISTRATION</div>
+              <h3>Tổng quan hệ thống</h3>
+            </div>
+            <ShieldCheck size={22} />
+          </div>
+
+          <div className="eh-mini-grid">
+            <MiniStat
+              label="Tổng thành viên"
+              value={dashboard.totalUsers ?? dashboard.users ?? "—"}
+            />
+            <MiniStat
+              label="Tổng nhiệm vụ"
+              value={dashboard.totalTasks ?? dashboard.tasks ?? "—"}
+            />
+            <MiniStat
+              label="Yêu cầu rút"
+              value={
+                dashboard.pendingWithdrawals ??
+                dashboard.pending ??
+                "—"
+              }
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="eh-section-heading eh-section-space">
+        <div>
+          <div className="eh-section-tag">QUICK ACCESS</div>
+          <h3>Truy cập nhanh</h3>
+        </div>
+      </div>
+
+      <div className="eh-quick-grid">
+        <QuickCard
+          icon={ClipboardList}
+          title="Nhiệm vụ"
+          description="Khám phá các nhiệm vụ đang có"
+          onClick={() => changePage("tasks")}
+        />
+        <QuickCard
+          icon={Gift}
+          title="Offerwall"
+          description="Nhiệm vụ từ đối tác"
+          onClick={() => changePage("offerwall")}
+        />
+        <QuickCard
+          icon={Wallet}
+          title="Ví của tôi"
+          description="Kiểm tra số dư tài khoản"
+          onClick={() => changePage("wallet")}
+        />
+        <QuickCard
+          icon={ArrowDownToLine}
+          title="Rút tiền"
+          description="Gửi yêu cầu rút tiền"
+          onClick={() => changePage("withdraw")}
+        />
+      </div>
+
+      <div className="eh-panel eh-panel-space">
+        <div className="eh-section-heading">
+          <div>
+            <div className="eh-section-tag">RECENT ACTIVITY</div>
+            <h3>Giao dịch gần đây</h3>
+          </div>
+          <button
+            className="eh-text-button"
+            onClick={() => changePage("history")}
+          >
+            Xem tất cả
+          </button>
+        </div>
+
+        <TransactionTable transactions={wallet.transactions.slice(0, 5)} />
+      </div>
+    </>
+  );
+}
+
+/* =========================================================
+   TASKS
+========================================================= */
+
+function TasksPage({ tasks }) {
+  return (
+    <div className="eh-page-stack">
+      <div className="eh-page-intro">
+        <div className="eh-section-tag">AVAILABLE TASKS</div>
+        <h2>Nhiệm vụ dành cho bạn</h2>
+        <p>Danh sách nhiệm vụ được cung cấp bởi hệ thống.</p>
+      </div>
+
+      {tasks.length === 0 ? (
+        <EmptyState
+          icon={ClipboardList}
+          title="Chưa có nhiệm vụ"
+          description="Hiện tại chưa có nhiệm vụ nào được đăng."
+        />
+      ) : (
+        <div className="eh-task-grid">
+          {tasks.map((task, index) => (
+            <div className="eh-task-card" key={task._id || task.id || index}>
+              <div className="eh-task-icon">
+                <Activity size={22} />
+              </div>
+
+              <div className="eh-task-content">
+                <h3>{task.title || task.name || "Nhiệm vụ"}</h3>
+                <p>{task.description || "Hoàn thành nhiệm vụ theo hướng dẫn."}</p>
+
+                <div className="eh-task-bottom">
+                  <strong>
+                    +{money(task.reward ?? task.points ?? 0)} điểm
+                  </strong>
+
+                  {task.url ? (
+                    <a
+                      href={safeHttpUrl(task.url)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="eh-small-button"
+                    >
+                      Thực hiện <ExternalLink size={14} />
+                    </a>
+                  ) : (
+                    <span className="eh-muted">Chưa có liên kết</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   OFFERWALL
+========================================================= */
+
+function OfferwallPage({ token }) {
+  const [tab, setTab] = useState("tasks");
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [source, setSource] = useState("");
+
+  const tabs = [
+    { id: "tasks", label: "Tasks" },
+    { id: "offers", label: "Offers" },
+    { id: "surveys", label: "Surveys" },
+  ];
+
+  const loadOfferwall = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const result = await request(`/offerwall/${tab}`, token);
+
+      setItems(getArray(result));
+      setSource(result.source || "Offerwall");
+    } catch (err) {
+      setItems([]);
+      setError(getErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [tab, token]);
+
+  useEffect(() => {
+    loadOfferwall();
+  }, [loadOfferwall]);
+
+  function openOffer(item) {
+    const rawUrl =
+      item.url ||
+      item.link ||
+      item.offer_url ||
+      item.click_url ||
+      item.tracking_url;
+
+    const url = safeHttpUrl(rawUrl);
+
+    if (!url) {
+      setError("Nhiệm vụ này chưa có đường dẫn hợp lệ.");
+      return;
+    }
+
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+
+    if (!opened) {
+      setError("Trình duyệt đã chặn cửa sổ mới. Hãy cho phép mở liên kết.");
+    }
+  }
+
+  return (
+    <div className="eh-page-stack">
+      <div className="eh-page-intro">
+        <div className="eh-section-tag">PARTNER OFFERWALL</div>
+        <h2>Nhiệm vụ từ đối tác</h2>
+        <p>
+          Khám phá nhiệm vụ, ưu đãi và khảo sát từ hệ thống đối tác.
+        </p>
+      </div>
+
+      <div className="eh-offer-info">
+        <AlertCircle size={19} />
+        <div>
+          <strong>Lưu ý về tiền thưởng</strong>
+          <p>
+            Bạn sẽ được chuyển đến trang của đối tác để thực hiện nhiệm vụ.
+            Việc mở liên kết chưa có nghĩa là nhiệm vụ đã hoàn thành hoặc tiền
+            đã được cộng. Số dư chỉ được cập nhật khi máy chủ nhận và xác minh
+            thông báo postback hợp lệ từ đối tác.
+          </p>
+        </div>
+      </div>
+
+      <div className="eh-tabs">
+        {tabs.map((item) => (
+          <button
+            key={item.id}
+            className={tab === item.id ? "active" : ""}
+            onClick={() => setTab(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+
+        <button
+          className="eh-refresh-tab"
+          onClick={loadOfferwall}
+          disabled={loading}
+          title="Tải lại"
+        >
+          <RefreshCw size={16} className={loading ? "eh-spin" : ""} />
+        </button>
+      </div>
+
+      {source && <div className="eh-source-label">Nguồn: {source}</div>}
+
+      {error && (
+        <div className="eh-alert eh-alert-error">
+          <AlertCircle size={17} />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="eh-loading eh-loading-large">
+          <RefreshCw size={20} className="eh-spin" />
+          Đang tải danh sách nhiệm vụ...
+        </div>
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon={Gift}
+          title="Chưa có dữ liệu"
+          description="Đối tác hiện chưa trả về nhiệm vụ trong mục này."
+        />
+      ) : (
+        <div className="eh-task-grid">
+          {items.map((item, index) => {
+            const reward =
+              item.reward ??
+              item.payout ??
+              item.amount ??
+              item.points ??
+              0;
+
+            const currency =
+              item.currency ||
+              item.currency_code ||
+              item.currencyCode ||
+              "";
+
+            return (
+              <div
+                className="eh-task-card eh-offer-card"
+                key={item.id || item.offer_id || item._id || index}
+              >
+                <div className="eh-task-icon eh-offer-icon">
+                  <Gift size={22} />
+                </div>
+
+                <div className="eh-task-content">
+                  <h3>
+                    {item.title ||
+                      item.name ||
+                      item.offer_name ||
+                      "Nhiệm vụ đối tác"}
+                  </h3>
+
+                  <p>
+                    {item.description ||
+                      item.instructions ||
+                      "Xem hướng dẫn và điều kiện hoàn thành trên trang đối tác."}
+                  </p>
+
+                  <div className="eh-offer-reward">
+                    <span>Thưởng hiển thị từ đối tác</span>
+                    <strong>
+                      {money(reward)} {currency}
+                    </strong>
+                    {!currency && (
+                      <small>
+                        Đơn vị đối tác; chưa xác nhận là VNĐ.
+                      </small>
+                    )}
+                  </div>
+
+                  <button
+                    className="eh-primary-button eh-offer-button"
+                    onClick={() => openOffer(item)}
+                  >
+                    Mở nhiệm vụ <ExternalLink size={15} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   WALLET
+========================================================= */
+
+function WalletPage({ wallet, changePage }) {
+  return (
+    <div className="eh-page-stack">
+      <div className="eh-page-intro">
+        <div className="eh-section-tag">MY WALLET</div>
+        <h2>Ví của tôi</h2>
+        <p>Thông tin số dư hiện tại của tài khoản.</p>
+      </div>
+
+      <div className="eh-wallet-card">
+        <div className="eh-wallet-card-top">
+          <span>TỔNG SỐ DƯ ĐIỂM</span>
+          <Wallet size={23} />
+        </div>
+
+        <div className="eh-wallet-amount">
+          {money(wallet.points)} <small>điểm</small>
+        </div>
+
+        <div className="eh-wallet-vnd">
+          Giá trị ví: {money(wallet.balanceVND)} VNĐ
+        </div>
+
+        <div className="eh-wallet-actions">
+          <button
+            className="eh-primary-button"
+            onClick={() => changePage("withdraw")}
+          >
+            <ArrowDownToLine size={17} /> Rút tiền
+          </button>
+
+          <button
+            className="eh-outline-button"
+            onClick={() => changePage("history")}
+          >
+            <History size={17} /> Lịch sử
+          </button>
+        </div>
+      </div>
+
+      <div className="eh-panel">
+        <div className="eh-section-heading">
+          <div>
+            <div className="eh-section-tag">TRANSACTIONS</div>
+            <h3>Lịch sử giao dịch</h3>
+          </div>
+        </div>
+        <TransactionTable transactions={wallet.transactions} />
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   WITHDRAW
+========================================================= */
+
+function WithdrawPage({
+  wallet,
+  withdrawals,
+  submitWithdrawal,
+  busy,
+}) {
+  return (
+    <div className="eh-page-stack">
+      <div className="eh-page-intro">
+        <div className="eh-section-tag">WITHDRAWAL</div>
+        <h2>Yêu cầu rút tiền</h2>
+        <p>Điền thông tin nhận tiền để gửi yêu cầu đến quản trị viên.</p>
+      </div>
+
+      <div className="eh-two-column">
+        <div className="eh-panel">
+          <h3 className="eh-panel-title">Thông tin rút tiền</h3>
+
+          <div className="eh-available-balance">
+            <span>Số dư hiện tại</span>
+            <strong>{money(wallet.points)} điểm</strong>
+          </div>
+
+          <form className="eh-form" onSubmit={submitWithdrawal}>
+            <label className="eh-field">
+              <span>Số tiền muốn rút</span>
+              <input
+                name="amount"
+                type="number"
+                min="1"
+                placeholder="Nhập số tiền"
+                required
+              />
+            </label>
+
+            <label className="eh-field">
+              <span>Phương thức nhận tiền</span>
+              <select name="method" required defaultValue="">
+                <option value="" disabled>
+                  Chọn phương thức
+                </option>
+                <option value="MBBank">MBBank</option>
+                <option value="Vietcombank">Vietcombank</option>
+                <option value="Techcombank">Techcombank</option>
+                <option value="MoMo">MoMo</option>
+                <option value="Other">Khác</option>
+              </select>
+            </label>
+
+            <label className="eh-field">
+              <span>Số tài khoản / thông tin nhận tiền</span>
+              <input
+                name="account"
+                type="text"
+                placeholder="Nhập số tài khoản hoặc ví"
+                required
+              />
+            </label>
+
+            <button
+              type="submit"
+              className="eh-primary-button eh-full-button"
+              disabled={busy}
+            >
+              {busy ? "Đang gửi..." : "Gửi yêu cầu rút tiền"}
+            </button>
+          </form>
+        </div>
+
+        <div className="eh-panel">
+          <h3 className="eh-panel-title">Lịch sử yêu cầu</h3>
+          <WithdrawalList withdrawals={withdrawals} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   HISTORY
+========================================================= */
+
+function HistoryPage({ wallet, withdrawals }) {
+  return (
+    <div className="eh-page-stack">
+      <div className="eh-page-intro">
+        <div className="eh-section-tag">ACTIVITY HISTORY</div>
+        <h2>Lịch sử hoạt động</h2>
+        <p>Theo dõi giao dịch và các yêu cầu rút tiền.</p>
+      </div>
+
+      <div className="eh-panel">
+        <h3 className="eh-panel-title">Giao dịch ví</h3>
+        <TransactionTable transactions={wallet.transactions} />
+      </div>
+
+      <div className="eh-panel">
+        <h3 className="eh-panel-title">Yêu cầu rút tiền</h3>
+        <WithdrawalList withdrawals={withdrawals} />
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   ADMIN - MEMBERS
+========================================================= */
+
+function MembersPage({
+  members,
+  query,
+  setQuery,
+  updateUser,
+  busy,
+}) {
+  return (
+    <div className="eh-page-stack">
+      <div className="eh-page-intro">
+        <div className="eh-section-tag">USER MANAGEMENT</div>
+        <h2>Quản lý thành viên</h2>
+        <p>Danh sách tài khoản thành viên trên hệ thống.</p>
+      </div>
+
+      <div className="eh-panel">
+        <div className="eh-search-wrap">
+          <Search size={18} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Tìm theo tên tài khoản hoặc Gmail..."
+          />
+        </div>
+
+        <div className="eh-table-wrap">
+          <table className="eh-table">
+            <thead>
+              <tr>
+                <th>Thành viên</th>
+                <th>Email</th>
+                <th>Vai trò</th>
+                <th>Số dư</th>
+                <th>Trạng thái</th>
+                <th>Thao tác</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {members.map((member, index) => {
+                const id = member._id || member.id;
+
+                return (
+                  <tr key={id || index}>
+                    <td>
+                      <strong>{member.username || "—"}</strong>
+                    </td>
+                    <td>{member.email || "—"}</td>
+                    <td>{member.role || "user"}</td>
+                    <td>{money(member.points ?? member.balance ?? 0)}</td>
+                    <td>
+                      <StatusBadge
+                        status={member.status || (member.active ? "active" : "inactive")}
+                      />
+                    </td>
+                    <td>
+                      <div className="eh-table-actions">
+                        <button
+                          className="eh-mini-action"
+                          title="Cộng 100 điểm"
+                          disabled={busy || !id}
+                          onClick={() => updateUser(id, "addPoints", 100)}
+                        >
+                          <Plus size={15} />
+                        </button>
+
+                        <button
+                          className="eh-mini-action"
+                          title="Trừ 100 điểm"
+                          disabled={busy || !id}
+                          onClick={() => updateUser(id, "subtractPoints", 100)}
+                        >
+                          <Minus size={15} />
+                        </button>
+
+                        <button
+                          className="eh-mini-action"
+                          title="Khóa / mở tài khoản"
+                          disabled={busy || !id}
+                          onClick={() =>
+                            updateUser(
+                              id,
+                              "toggleStatus",
+                              member.status === "active" || member.active
+                                ? "inactive"
+                                : "active"
+                            )
+                          }
+                        >
+                          <Lock size={15} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {members.length === 0 && (
+                <tr>
+                  <td colSpan="6">
+                    <div className="eh-empty-inline">
+                      Không tìm thấy thành viên.
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   ADMIN - WITHDRAWALS
+========================================================= */
+
+function AdminWithdrawalsPage({
+  withdrawals,
+  processWithdrawal,
+  busy,
+}) {
+  return (
+    <div className="eh-page-stack">
+      <div className="eh-page-intro">
+        <div className="eh-section-tag">PAYOUT MANAGEMENT</div>
+        <h2>Quản lý rút tiền</h2>
+        <p>Kiểm tra và xử lý các yêu cầu rút tiền của thành viên.</p>
+      </div>
+
+      <div className="eh-panel">
+        <div className="eh-table-wrap">
+          <table className="eh-table">
+            <thead>
+              <tr>
+                <th>Thành viên</th>
+                <th>Số tiền</th>
+                <th>Phương thức</th>
+                <th>Tài khoản nhận</th>
+                <th>Trạng thái</th>
+                <th>Thao tác</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {withdrawals.map((item, index) => {
+                const id = item._id || item.id;
+
+                return (
+                  <tr key={id || index}>
+                    <td>{item.username || item.user?.username || "—"}</td>
+                    <td>{money(item.amount ?? item.value ?? 0)}</td>
+                    <td>{item.method || "—"}</td>
+                    <td>{item.account || item.accountNumber || "—"}</td>
+                    <td>
+                      <StatusBadge status={item.status || "pending"} />
+                    </td>
+                    <td>
+                      <div className="eh-table-actions">
+                        <button
+                          className="eh-approve-button"
+                          disabled={busy || !id}
+                          onClick={() => processWithdrawal(id, "approved")}
+                        >
+                          <CheckCircle2 size={14} /> Duyệt
+                        </button>
+                        <button
+                          className="eh-reject-button"
+                          disabled={busy || !id}
+                          onClick={() => processWithdrawal(id, "rejected")}
+                        >
+                          <XCircle size={14} /> Từ chối
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {withdrawals.length === 0 && (
+                <tr>
+                  <td colSpan="6">
+                    <div className="eh-empty-inline">
+                      Chưa có yêu cầu rút tiền.
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   ADMIN - TASKS
+========================================================= */
+
+function AdminTasksPage({ tasks, createTask, busy }) {
+  return (
+    <div className="eh-page-stack">
+      <div className="eh-page-intro">
+        <div className="eh-section-tag">TASK MANAGEMENT</div>
+        <h2>Quản lý nhiệm vụ</h2>
+        <p>Tạo nhiệm vụ hiển thị trong khu vực thành viên.</p>
+      </div>
+
+      <div className="eh-two-column">
+        <div className="eh-panel">
+          <h3 className="eh-panel-title">Tạo nhiệm vụ mới</h3>
+
+          <form className="eh-form" onSubmit={createTask}>
+            <label className="eh-field">
+              <span>Tên nhiệm vụ</span>
+              <input
+                name="title"
+                placeholder="Ví dụ: Theo dõi trang..."
+                required
+              />
+            </label>
+
+            <label className="eh-field">
+              <span>Mô tả</span>
+              <textarea
+                name="description"
+                rows="4"
+                placeholder="Mô tả hướng dẫn thực hiện..."
+              />
+            </label>
+
+            <label className="eh-field">
+              <span>Phần thưởng (điểm)</span>
+              <input
+                name="reward"
+                type="number"
+                min="1"
+                placeholder="100"
+                required
+              />
+            </label>
+
+            <label className="eh-field">
+              <span>Đường dẫn nhiệm vụ</span>
+              <input
+                name="url"
+                type="url"
+                placeholder="https://..."
+              />
+            </label>
+
+            <button
+              className="eh-primary-button eh-full-button"
+              type="submit"
+              disabled={busy}
+            >
+              <Plus size={17} /> Tạo nhiệm vụ
+            </button>
+          </form>
+        </div>
+
+        <div className="eh-panel">
+          <h3 className="eh-panel-title">
+            Nhiệm vụ hiện có ({tasks.length})
+          </h3>
+
+          {tasks.length === 0 ? (
+            <EmptyState
+              icon={ClipboardList}
+              title="Chưa có nhiệm vụ"
+              description="Các nhiệm vụ đã tạo sẽ hiển thị ở đây."
+            />
+          ) : (
+            <div className="eh-admin-task-list">
+              {tasks.map((task, index) => (
+                <div
+                  className="eh-admin-task"
+                  key={task._id || task.id || index}
+                >
+                  <div>
+                    <strong>{task.title || task.name || "Nhiệm vụ"}</strong>
+                    <span>
+                      {money(task.reward ?? task.points ?? 0)} điểm
+                    </span>
+                  </div>
+                  <StatusBadge status={task.active === false ? "inactive" : "active"} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   REUSABLE COMPONENTS
+========================================================= */
+
+function StatCard({ label, value, unit, icon: Icon, tone }) {
+  return (
+    <div className="eh-stat-card">
+      <div className={`eh-stat-icon ${tone}`}>
+        <Icon size={22} />
+      </div>
+      <div className="eh-stat-label">{label}</div>
+      <div className="eh-stat-value">{value}</div>
+      <div className="eh-stat-unit">{unit}</div>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }) {
+  return (
+    <div className="eh-mini-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function QuickCard({ icon: Icon, title, description, onClick }) {
+  return (
+    <button className="eh-quick-card" onClick={onClick}>
+      <div className="eh-quick-icon">
+        <Icon size={21} />
+      </div>
+      <div>
+        <strong>{title}</strong>
+        <span>{description}</span>
+      </div>
+      <ExternalLink size={15} className="eh-quick-arrow" />
     </button>
   );
 }
 
-function TransactionTable({ rows = [] }) {
-  if (!rows.length) {
+function TransactionTable({ transactions = [] }) {
+  if (!transactions.length) {
     return (
-      <div className="empty">
-        Chưa có giao dịch nào.
-      </div>
+      <EmptyState
+        icon={History}
+        title="Chưa có giao dịch"
+        description="Giao dịch của bạn sẽ hiển thị tại đây."
+      />
     );
   }
 
   return (
-    <div className="table-wrap">
-      <table>
+    <div className="eh-table-wrap">
+      <table className="eh-table">
         <thead>
           <tr>
             <th>Loại giao dịch</th>
-            <th>Điểm</th>
+            <th>Số điểm</th>
             <th>Trạng thái</th>
-            <th>Ghi chú</th>
             <th>Thời gian</th>
           </tr>
         </thead>
-
         <tbody>
-          {rows.map((row) => (
-            <tr key={row._id}>
+          {transactions.map((item, index) => (
+            <tr key={item._id || item.id || index}>
+              <td>{item.description || item.type || item.title || "Giao dịch"}</td>
+              <td className={Number(item.amount ?? item.points ?? 0) >= 0 ? "eh-positive" : "eh-negative"}>
+                {Number(item.amount ?? item.points ?? 0) > 0 ? "+" : ""}
+                {money(item.amount ?? item.points ?? 0)}
+              </td>
               <td>
-                {row.type === "withdrawal"
-                  ? "Rút tiền"
-                  : row.type === "reward"
-                    ? "Thưởng"
-                    : "Điều chỉnh"}
+                <StatusBadge status={item.status || "completed"} />
               </td>
-
-              <td
-                className={
-                  row.points >= 0
-                    ? "positive"
-                    : "negative"
-                }
-              >
-                {row.points > 0 ? "+" : ""}
-                {money(row.points)}
-              </td>
-
-              <td>
-                <span
-                  className={`status-pill ${row.status}`}
-                >
-                  {row.status === "completed"
-                    ? "Hoàn tất"
-                    : row.status === "pending"
-                      ? "Đang chờ"
-                      : "Từ chối"}
-                </span>
-              </td>
-
-              <td>{row.note || "—"}</td>
-              <td>{date(row.createdAt)}</td>
+              <td>{formatDate(item.createdAt || item.date)}</td>
             </tr>
           ))}
         </tbody>
@@ -2021,4 +1882,1503 @@ function TransactionTable({ rows = [] }) {
   );
 }
 
-export default App;
+function WithdrawalList({ withdrawals = [] }) {
+  if (!withdrawals.length) {
+    return (
+      <EmptyState
+        icon={ArrowDownToLine}
+        title="Chưa có yêu cầu"
+        description="Bạn chưa gửi yêu cầu rút tiền nào."
+      />
+    );
+  }
+
+  return (
+    <div className="eh-withdrawal-list">
+      {withdrawals.map((item, index) => (
+        <div className="eh-withdrawal-item" key={item._id || item.id || index}>
+          <div className="eh-withdrawal-icon">
+            <ArrowDownToLine size={18} />
+          </div>
+          <div className="eh-withdrawal-info">
+            <strong>{money(item.amount ?? item.value ?? 0)}</strong>
+            <span>
+              {item.method || "Phương thức chưa rõ"} ·{" "}
+              {formatDate(item.createdAt || item.date)}
+            </span>
+          </div>
+          <StatusBadge status={item.status || "pending"} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
+  const normalized = String(status || "").toLowerCase();
+
+  let label = status || "Không rõ";
+  let type = "neutral";
+
+  if (
+    ["active", "approved", "completed", "success", "done"].includes(
+      normalized
+    )
+  ) {
+    type = "success";
+    label =
+      normalized === "active"
+        ? "Hoạt động"
+        : normalized === "approved"
+        ? "Đã duyệt"
+        : "Hoàn thành";
+  } else if (
+    ["pending", "processing", "waiting"].includes(normalized)
+  ) {
+    type = "warning";
+    label = "Đang chờ";
+  } else if (
+    ["inactive", "rejected", "failed", "blocked"].includes(normalized)
+  ) {
+    type = "danger";
+    label =
+      normalized === "inactive"
+        ? "Đã khóa"
+        : normalized === "rejected"
+        ? "Từ chối"
+        : "Thất bại";
+  }
+
+  return <span className={`eh-status ${type}`}>{label}</span>;
+}
+
+function EmptyState({ icon: Icon, title, description }) {
+  return (
+    <div className="eh-empty">
+      <div className="eh-empty-icon">
+        <Icon size={25} />
+      </div>
+      <strong>{title}</strong>
+      <p>{description}</p>
+    </div>
+  );
+}
+
+function safeHttpUrl(value) {
+  if (!value) return "";
+
+  try {
+    const url = new URL(String(value));
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return "";
+    }
+
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+function getPageTitle(page) {
+  const titles = {
+    overview: "Tổng quan",
+    tasks: "Nhiệm vụ",
+    offerwall: "Offerwall",
+    wallet: "Ví của tôi",
+    withdraw: "Rút tiền",
+    history: "Lịch sử",
+    members: "Thành viên",
+    adminWithdrawals: "Quản lý rút tiền",
+    adminTasks: "Quản lý nhiệm vụ",
+  };
+
+  return titles[page] || "Tổng quan";
+}
+
+/* =========================================================
+   RESPONSIVE CSS
+========================================================= */
+
+const APP_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap');
+
+:root {
+  font-family: 'Be Vietnam Pro', Arial, sans-serif;
+  color: #edf0ff;
+  background: #090b16;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  min-height: 100%;
+  margin: 0;
+  width: 100%;
+}
+
+body {
+  background: #090b16;
+}
+
+button, input, textarea, select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.eh-app {
+  min-height: 100vh;
+  display: flex;
+  background:
+    radial-gradient(circle at 75% 0%, rgba(93, 67, 190, .12), transparent 28%),
+    #090b16;
+  color: #edf0ff;
+}
+
+.eh-sidebar {
+  width: 252px;
+  flex: 0 0 252px;
+  min-height: 100vh;
+  padding: 25px 17px;
+  display: flex;
+  flex-direction: column;
+  background: #0e1020;
+  border-right: 1px solid rgba(255,255,255,.07);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  z-index: 30;
+}
+
+.eh-brand, .eh-auth-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.eh-brand {
+  padding: 0 8px 30px;
+}
+
+.eh-brand-icon {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  border-radius: 15px;
+  display: grid;
+  place-items: center;
+  color: white;
+  background: linear-gradient(135deg, #8057ff, #4c35c9);
+  box-shadow: 0 8px 25px rgba(111, 78, 255, .25);
+}
+
+.eh-brand strong, .eh-auth-logo strong {
+  display: block;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -.5px;
+}
+
+.eh-brand span, .eh-auth-logo span {
+  display: block;
+  color: #8c91ad;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  margin-top: 3px;
+}
+
+.eh-sidebar-label, .eh-section-tag, .eh-page-eyebrow {
+  color: #858ba9;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.6px;
+}
+
+.eh-sidebar-label {
+  padding: 0 12px 13px;
+}
+
+.eh-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.eh-nav-item {
+  border: 0;
+  background: transparent;
+  color: #a5aac2;
+  border-radius: 11px;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 13px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  transition: .2s;
+  width: 100%;
+}
+
+.eh-nav-item:hover, .eh-nav-item.active {
+  color: white;
+  background: linear-gradient(90deg, rgba(124, 91, 255, .2), rgba(124, 91, 255, .06));
+}
+
+.eh-nav-item.active {
+  box-shadow: inset 3px 0 #9678ff;
+}
+
+.eh-sidebar-bottom {
+  margin-top: auto;
+  border-top: 1px solid rgba(255,255,255,.08);
+  padding-top: 17px;
+}
+
+.eh-sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 7px 15px;
+  min-width: 0;
+}
+
+.eh-avatar, .eh-top-avatar {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #493b8e;
+  color: white;
+  font-weight: 800;
+}
+
+.eh-user-info {
+  min-width: 0;
+}
+
+.eh-user-info strong, .eh-user-info span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.eh-user-info strong {
+  font-size: 12px;
+}
+
+.eh-user-info span {
+  color: #858ba9;
+  font-size: 10px;
+  margin-top: 3px;
+}
+
+.eh-logout {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px;
+  padding: 11px 12px;
+  color: #c2c5d7;
+  background: rgba(255,255,255,.025);
+  font-size: 12px;
+}
+
+.eh-logout:hover {
+  color: #ff858e;
+  border-color: rgba(255,100,120,.3);
+}
+
+.eh-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.eh-topbar {
+  height: 78px;
+  flex: 0 0 78px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 0 34px;
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  background: rgba(12,14,27,.8);
+}
+
+.eh-topbar-left, .eh-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.eh-topbar h1 {
+  font-size: 17px;
+  margin: 3px 0 0;
+  font-weight: 700;
+}
+
+.eh-page-eyebrow {
+  font-size: 8px;
+}
+
+.eh-topbar-right {
+  color: #c8cbe0;
+}
+
+.eh-top-balance {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(129,100,255,.12);
+  border: 1px solid rgba(129,100,255,.2);
+  border-radius: 20px;
+  padding: 9px 13px;
+  color: #c7baff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.eh-icon-button {
+  width: 37px;
+  height: 37px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.1);
+  background: rgba(255,255,255,.035);
+  color: #c8cbe0;
+  border-radius: 10px;
+}
+
+.eh-content {
+  width: 100%;
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 30px 34px 45px;
+  min-width: 0;
+  flex: 1;
+}
+
+.eh-footer {
+  padding: 18px 34px;
+  border-top: 1px solid rgba(255,255,255,.06);
+  color: #6f7592;
+  font-size: 10px;
+  text-align: center;
+}
+
+.eh-welcome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 27px 29px;
+  border: 1px solid rgba(151,125,255,.18);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 90% 20%, rgba(135,104,255,.2), transparent 30%),
+    linear-gradient(110deg, #19172f, #17182b);
+  margin-bottom: 22px;
+  min-width: 0;
+}
+
+.eh-welcome h2 {
+  margin: 9px 0 7px;
+  font-size: clamp(20px, 3vw, 27px);
+  overflow-wrap: anywhere;
+}
+
+.eh-welcome p, .eh-page-intro p {
+  margin: 0;
+  color: #9298b4;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.eh-welcome-icon {
+  width: 68px;
+  height: 68px;
+  flex: 0 0 68px;
+  border-radius: 20px;
+  display: grid;
+  place-items: center;
+  color: #c7baff;
+  background: rgba(135,104,255,.15);
+}
+
+.eh-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 15px;
+}
+
+.eh-stat-card, .eh-panel, .eh-quick-card, .eh-task-card, .eh-mini-stat {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.075);
+  background: #111426;
+  border-radius: 15px;
+}
+
+.eh-stat-card {
+  padding: 19px;
+}
+
+.eh-stat-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  margin-bottom: 17px;
+}
+
+.eh-stat-icon.purple { background: rgba(143,105,255,.15); color: #ae94ff; }
+.eh-stat-icon.blue { background: rgba(69,151,255,.14); color: #78baff; }
+.eh-stat-icon.orange { background: rgba(255,168,76,.13); color: #ffbd72; }
+.eh-stat-icon.green { background: rgba(68,210,151,.13); color: #70e3b3; }
+
+.eh-stat-label, .eh-stat-unit {
+  color: #9298b4;
+  font-size: 11px;
+}
+
+.eh-stat-value {
+  font-size: clamp(20px, 2.5vw, 26px);
+  font-weight: 800;
+  margin: 7px 0 3px;
+  overflow-wrap: anywhere;
+}
+
+.eh-admin-summary, .eh-panel {
+  padding: 21px;
+}
+
+.eh-admin-summary {
+  margin-top: 22px;
+  border: 1px solid rgba(255,255,255,.075);
+  border-radius: 15px;
+  background: #111426;
+}
+
+.eh-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 17px;
+}
+
+.eh-section-heading h3, .eh-panel-title {
+  font-size: 15px;
+  margin: 6px 0 0;
+}
+
+.eh-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0,1fr));
+  gap: 12px;
+}
+
+.eh-mini-stat {
+  padding: 15px;
+}
+
+.eh-mini-stat span, .eh-mini-stat strong {
+  display: block;
+}
+
+.eh-mini-stat span {
+  color: #9399b3;
+  font-size: 11px;
+}
+
+.eh-mini-stat strong {
+  font-size: 22px;
+  margin-top: 8px;
+}
+
+.eh-section-space {
+  margin-top: 28px;
+}
+
+.eh-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 12px;
+}
+
+.eh-quick-card {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 17px;
+  text-align: left;
+  color: #edf0ff;
+  transition: .2s;
+}
+
+.eh-quick-card:hover {
+  border-color: rgba(147,119,255,.4);
+  transform: translateY(-2px);
+}
+
+.eh-quick-icon, .eh-empty-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(130,100,255,.14);
+  color: #b7a3ff;
+}
+
+.eh-quick-card strong, .eh-quick-card span {
+  display: block;
+}
+
+.eh-quick-card strong {
+  font-size: 12px;
+}
+
+.eh-quick-card span {
+  color: #8f95b0;
+  font-size: 10px;
+  margin-top: 5px;
+  line-height: 1.5;
+}
+
+.eh-quick-arrow {
+  margin-left: auto;
+  color: #7d83a0;
+  flex: 0 0 auto;
+}
+
+.eh-panel-space {
+  margin-top: 22px;
+}
+
+.eh-text-button {
+  border: 0;
+  background: none;
+  color: #a995ff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.eh-page-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.eh-page-intro h2 {
+  font-size: 23px;
+  margin: 7px 0;
+}
+
+.eh-task-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 14px;
+}
+
+.eh-task-card {
+  display: flex;
+  gap: 14px;
+  padding: 19px;
+}
+
+.eh-task-icon {
+  width: 43px;
+  height: 43px;
+  flex: 0 0 43px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: rgba(120,100,255,.14);
+  color: #b5a2ff;
+}
+
+.eh-task-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.eh-task-content h3 {
+  margin: 1px 0 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.eh-task-content p {
+  color: #9298b4;
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.eh-task-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 17px;
+}
+
+.eh-task-bottom strong {
+  color: #81e4b8;
+  font-size: 12px;
+}
+
+.eh-small-button, .eh-primary-button, .eh-outline-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 9px;
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.eh-small-button, .eh-primary-button {
+  color: white;
+  border: 0;
+  background: linear-gradient(135deg, #805dff, #6544d6);
+}
+
+.eh-small-button:hover, .eh-primary-button:hover {
+  filter: brightness(1.12);
+}
+
+.eh-primary-button:disabled {
+  opacity: .6;
+}
+
+.eh-outline-button {
+  color: #c9c4e9;
+  background: rgba(255,255,255,.035);
+  border: 1px solid rgba(255,255,255,.12);
+}
+
+.eh-offer-info {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  color: #e5d7a8;
+  background: rgba(190,147,57,.09);
+  border: 1px solid rgba(190,147,57,.2);
+  border-radius: 12px;
+}
+
+.eh-offer-info > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.eh-offer-info strong {
+  font-size: 12px;
+}
+
+.eh-offer-info p {
+  margin: 5px 0 0;
+  color: #b8ad8d;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.eh-tabs {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  padding-bottom: 10px;
+}
+
+.eh-tabs button {
+  border: 0;
+  border-radius: 8px;
+  padding: 9px 16px;
+  color: #a3a9c1;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.eh-tabs button.active {
+  color: white;
+  background: rgba(128,93,255,.2);
+}
+
+.eh-tabs .eh-refresh-tab {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  padding: 9px;
+}
+
+.eh-source-label {
+  color: #777e9c;
+  font-size: 10px;
+}
+
+.eh-offer-reward {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 14px;
+}
+
+.eh-offer-reward span, .eh-offer-reward small {
+  color: #9298b4;
+  font-size: 10px;
+}
+
+.eh-offer-reward strong {
+  color: #82e3b6;
+  font-size: 17px;
+}
+
+.eh-offer-button {
+  margin-top: 13px;
+}
+
+.eh-wallet-card {
+  padding: 27px;
+  border-radius: 18px;
+  border: 1px solid rgba(151,125,255,.2);
+  background:
+    radial-gradient(circle at 85% 0%, rgba(148,113,255,.25), transparent 35%),
+    linear-gradient(120deg, #211b43, #17172e);
+}
+
+.eh-wallet-card-top {
+  display: flex;
+  justify-content: space-between;
+  color: #b7addf;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.eh-wallet-amount {
+  font-size: clamp(30px, 5vw, 43px);
+  font-weight: 800;
+  margin: 20px 0 5px;
+  overflow-wrap: anywhere;
+}
+
+.eh-wallet-amount small {
+  font-size: 14px;
+  color: #aaa1d1;
+}
+
+.eh-wallet-vnd {
+  color: #a5a1c1;
+  font-size: 11px;
+}
+
+.eh-wallet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.eh-two-column {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.eh-form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-top: 18px;
+}
+
+.eh-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.eh-field > span {
+  color: #c4c8dc;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.eh-field input, .eh-field textarea, .eh-field select,
+.eh-search-wrap input {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  color: #f1f1ff;
+  background: #0b0e1c;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 9px;
+  padding: 12px 13px;
+  outline: none;
+  font-size: 12px;
+}
+
+.eh-field input:focus, .eh-field textarea:focus, .eh-field select:focus,
+.eh-search-wrap input:focus {
+  border-color: #876aff;
+  box-shadow: 0 0 0 3px rgba(135,106,255,.1);
+}
+
+.eh-field textarea {
+  resize: vertical;
+}
+
+.eh-field select option {
+  background: #111426;
+}
+
+.eh-full-button {
+  width: 100%;
+  min-height: 43px;
+}
+
+.eh-available-balance {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 13px;
+  border-radius: 9px;
+  background: rgba(128,93,255,.1);
+  color: #aaa2ce;
+  font-size: 11px;
+}
+
+.eh-available-balance strong {
+  color: #c9baff;
+}
+
+.eh-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.eh-table {
+  width: 100%;
+  min-width: 650px;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.eh-table th {
+  padding: 12px 11px;
+  color: #858ba8;
+  font-size: 10px;
+  font-weight: 700;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  white-space: nowrap;
+}
+
+.eh-table td {
+  padding: 13px 11px;
+  color: #c2c6d9;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(255,255,255,.055);
+  overflow-wrap: anywhere;
+}
+
+.eh-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.eh-positive { color: #76dfb0 !important; }
+.eh-negative { color: #ff8e9c !important; }
+
+.eh-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 8px;
+  border-radius: 20px;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.eh-status.success { color: #75e0b2; background: rgba(72,204,146,.12); }
+.eh-status.warning { color: #f0c477; background: rgba(228,173,75,.12); }
+.eh-status.danger { color: #ff8c9a; background: rgba(240,89,111,.12); }
+.eh-status.neutral { color: #aeb4ca; background: rgba(255,255,255,.08); }
+
+.eh-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  margin-bottom: 18px;
+  padding-left: 12px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px;
+  color: #8e94b0;
+  background: #0b0e1c;
+}
+
+.eh-search-wrap input {
+  border: 0;
+  background: transparent;
+}
+
+.eh-table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.eh-mini-action, .eh-approve-button, .eh-reject-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 7px;
+  border-radius: 7px;
+  border: 1px solid rgba(255,255,255,.1);
+  background: rgba(255,255,255,.04);
+  color: #c4c8dc;
+  font-size: 9px;
+}
+
+.eh-approve-button {
+  color: #7ce0b2;
+  border-color: rgba(72,204,146,.2);
+}
+
+.eh-reject-button {
+  color: #ff929e;
+  border-color: rgba(240,89,111,.2);
+}
+
+.eh-withdrawal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 17px;
+}
+
+.eh-withdrawal-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: rgba(255,255,255,.025);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px;
+  min-width: 0;
+}
+
+.eh-withdrawal-icon {
+  width: 35px;
+  height: 35px;
+  flex: 0 0 35px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: #b8a6ff;
+  background: rgba(128,93,255,.13);
+}
+
+.eh-withdrawal-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.eh-withdrawal-info strong, .eh-withdrawal-info span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.eh-withdrawal-info strong {
+  font-size: 12px;
+}
+
+.eh-withdrawal-info span {
+  color: #8990aa;
+  font-size: 9px;
+  margin-top: 4px;
+}
+
+.eh-admin-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 17px;
+}
+
+.eh-admin-task {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: rgba(255,255,255,.025);
+  border-radius: 9px;
+}
+
+.eh-admin-task strong, .eh-admin-task span {
+  display: block;
+}
+
+.eh-admin-task strong {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.eh-admin-task span {
+  color: #83dfb5;
+  font-size: 10px;
+  margin-top: 5px;
+}
+
+.eh-empty {
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 22px;
+  color: #9298b4;
+}
+
+.eh-empty-icon {
+  margin-bottom: 12px;
+}
+
+.eh-empty strong {
+  color: #d8dbeb;
+  font-size: 12px;
+}
+
+.eh-empty p {
+  max-width: 330px;
+  color: #858ba7;
+  font-size: 10px;
+  line-height: 1.7;
+  margin: 6px 0 0;
+}
+
+.eh-empty-inline {
+  padding: 25px;
+  text-align: center;
+  color: #858ba7;
+}
+
+.eh-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  margin-bottom: 15px;
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.eh-alert > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.eh-alert button {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.eh-alert-error {
+  color: #ffabb4;
+  border: 1px solid rgba(255,100,120,.2);
+  background: rgba(255,80,100,.08);
+}
+
+.eh-alert-success {
+  color: #8be4bc;
+  border: 1px solid rgba(80,220,160,.2);
+  background: rgba(80,220,160,.08);
+}
+
+.eh-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #aaa2ce;
+  font-size: 11px;
+  margin-bottom: 13px;
+}
+
+.eh-loading-large {
+  justify-content: center;
+  padding: 35px;
+}
+
+.eh-spin {
+  animation: eh-spin 1s linear infinite;
+}
+
+@keyframes eh-spin {
+  to { transform: rotate(360deg); }
+}
+
+.eh-auth {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 30px 16px;
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(111,78,255,.18), transparent 30%),
+    radial-gradient(circle at 85% 80%, rgba(57,120,255,.12), transparent 28%),
+    #090b16;
+  color: #edf0ff;
+}
+
+.eh-auth-decoration {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(2px);
+  pointer-events: none;
+}
+
+.eh-decoration-one {
+  width: 260px;
+  height: 260px;
+  border: 1px solid rgba(139,112,255,.14);
+  top: -100px;
+  right: -80px;
+}
+
+.eh-decoration-two {
+  width: 350px;
+  height: 350px;
+  border: 1px solid rgba(139,112,255,.1);
+  bottom: -200px;
+  left: -120px;
+}
+
+.eh-auth-card {
+  width: min(100%, 450px);
+  position: relative;
+  z-index: 1;
+  padding: 34px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 20px;
+  background: rgba(17,20,38,.96);
+  box-shadow: 0 25px 90px rgba(0,0,0,.4);
+}
+
+.eh-auth-logo {
+  justify-content: center;
+  margin-bottom: 30px;
+}
+
+.eh-auth-heading {
+  text-align: center;
+  margin-bottom: 25px;
+}
+
+.eh-auth-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  color: #b6a5ff;
+  background: rgba(128,93,255,.12);
+  border-radius: 20px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .7px;
+}
+
+.eh-auth-heading h1 {
+  font-size: 24px;
+  margin: 15px 0 8px;
+}
+
+.eh-auth-heading p {
+  color: #9298b4;
+  font-size: 11px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.eh-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.eh-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 10px;
+  background: #0b0e1c;
+  color: #858ba8;
+}
+
+.eh-input-wrap:focus-within {
+  border-color: #876aff;
+  box-shadow: 0 0 0 3px rgba(135,106,255,.1);
+}
+
+.eh-input-wrap input {
+  width: 100%;
+  min-width: 0;
+  height: 45px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: white;
+  font-size: 11px;
+}
+
+.eh-input-wrap input:focus {
+  box-shadow: none;
+}
+
+.eh-at {
+  color: #9298b4;
+  font-size: 15px;
+}
+
+.eh-auth-submit {
+  min-height: 46px;
+  width: 100%;
+  margin-top: 5px;
+}
+
+.eh-auth-switch {
+  text-align: center;
+  margin-top: 23px;
+  color: #9298b4;
+  font-size: 10px;
+}
+
+.eh-auth-switch button {
+  border: 0;
+  background: none;
+  color: #b6a3ff;
+  font-size: 10px;
+  font-weight: 800;
+  margin-left: 5px;
+}
+
+.eh-auth-security {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #737b98;
+  font-size: 9px;
+  margin-top: 24px;
+}
+
+.eh-mobile-overlay {
+  display: none;
+}
+
+.eh-menu-button, .eh-close-menu {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  .eh-stat-grid {
+    grid-template-columns: repeat(2, minmax(0,1fr));
+  }
+
+  .eh-content {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  .eh-topbar {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+}
+
+@media (max-width: 760px) {
+  .eh-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    transform: translateX(-105%);
+    transition: transform .25s ease;
+    box-shadow: 20px 0 60px rgba(0,0,0,.35);
+  }
+
+  .eh-sidebar.eh-sidebar-open {
+    transform: translateX(0);
+  }
+
+  .eh-mobile-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 25;
+    border: 0;
+    background: rgba(0,0,0,.6);
+  }
+
+  .eh-menu-button, .eh-close-menu {
+    display: grid;
+  }
+
+  .eh-close-menu {
+    margin-left: auto;
+  }
+
+  .eh-topbar {
+    height: 68px;
+    flex-basis: 68px;
+    padding: 0 15px;
+  }
+
+  .eh-content {
+    padding: 20px 15px 35px;
+  }
+
+  .eh-top-balance {
+    padding: 8px 10px;
+  }
+
+  .eh-top-avatar {
+    display: none;
+  }
+
+  .eh-welcome {
+    padding: 21px;
+  }
+
+  .eh-two-column {
+    grid-template-columns: 1fr;
+  }
+
+  .eh-task-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .eh-footer {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 520px) {
+  .eh-stat-grid {
+    grid-template-columns: repeat(2, minmax(0,1fr));
+    gap: 9px;
+  }
+
+  .eh-stat-card {
+    padding: 13px;
+  }
+
+  .eh-stat-value {
+    font-size: 19px;
+  }
+
+  .eh-stat-icon {
+    width: 34px;
+    height: 34px;
+    margin-bottom: 12px;
+  }
+
+  .eh-quick-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .eh-mini-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .eh-welcome-icon {
+    display: none;
+  }
+
+  .eh-panel {
+    padding: 15px;
+  }
+
+  .eh-auth-card {
+    padding: 25px 19px;
+  }
+
+  .eh-auth-heading h1 {
+    font-size: 21px;
+  }
+
+  .eh-topbar h1 {
+    font-size: 14px;
+  }
+
+  .eh-top-balance {
+    font-size: 9px;
+  }
+}
+
+@media (max-width: 360px) {
+  .eh-stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .eh-topbar-right {
+    gap: 6px;
+  }
+
+  .eh-top-balance {
+    padding: 7px;
+  }
+}
+`;

@@ -1,5 +1,11 @@
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
 import {
   Activity,
   Wallet,
@@ -22,24 +28,41 @@ import {
   X,
   CircleDollarSign,
   AlertCircle,
+  ExternalLink,
+  Clock,
+  Gift,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
-const API = (import.meta.env.VITE_API_URL || "http://localhost:5000/api").replace(/\/+$/, "");
+const API = (
+  import.meta.env.VITE_API_URL || "http://localhost:5000/api"
+).replace(/\/+$/, "");
 
 const money = (value) =>
-  Number(value || 0).toLocaleString("vi-VN", { maximumFractionDigits: 2 });
+  Number(value || 0).toLocaleString("vi-VN", {
+    maximumFractionDigits: 2,
+  });
 
 const date = (value) => {
   if (!value) return "—";
+
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleString("vi-VN");
+
+  return Number.isNaN(parsed.getTime())
+    ? "—"
+    : parsed.toLocaleString("vi-VN");
 };
 
 async function request(path, token, options = {}) {
   const headers = {
     Accept: "application/json",
-    ...(options.body ? { "Content-Type": "application/json" } : {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(options.body
+      ? { "Content-Type": "application/json" }
+      : {}),
+    ...(token
+      ? { Authorization: `Bearer ${token}` }
+      : {}),
     ...options.headers,
   };
 
@@ -53,12 +76,51 @@ async function request(path, token, options = {}) {
   if (!response.ok) {
     throw new Error(
       result.message ||
-      result.error ||
-      `Yêu cầu thất bại (HTTP ${response.status})`
+        result.error ||
+        `Yêu cầu thất bại (HTTP ${response.status})`
     );
   }
 
   return result;
+}
+
+function getArray(result, keys = []) {
+  if (Array.isArray(result)) return result;
+
+  for (const key of keys) {
+    if (Array.isArray(result?.[key])) {
+      return result[key];
+    }
+  }
+
+  if (Array.isArray(result?.data)) {
+    return result.data;
+  }
+
+  return [];
+}
+
+function safeExternalUrl(value) {
+  if (typeof value !== "string") return "";
+
+  try {
+    const url = new URL(value);
+
+    if (
+      url.protocol !== "https:" &&
+      url.protocol !== "http:"
+    ) {
+      return "";
+    }
+
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+function getErrorMessage(error) {
+  return error?.message || "Đã xảy ra lỗi. Vui lòng thử lại.";
 }
 
 function App() {
@@ -67,6 +129,7 @@ function App() {
   );
 
   const [user, setUser] = useState(null);
+
   const [authMode, setAuthMode] = useState("login");
   const [page, setPage] = useState("overview");
 
@@ -75,6 +138,8 @@ function App() {
 
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  const [showPassword, setShowPassword] = useState(false);
 
   const [wallet, setWallet] = useState({
     points: 0,
@@ -94,114 +159,134 @@ function App() {
 
   const isAdmin = user?.role === "admin";
 
-  const load = useCallback(async (activeToken = token) => {
-    if (!activeToken) return;
+  const logout = useCallback(() => {
+    localStorage.removeItem("earnhub_token");
 
-    setLoading(true);
+    setToken("");
+    setUser(null);
+    setPage("overview");
+
+    setWallet({
+      points: 0,
+      balanceVND: 0,
+      transactions: [],
+    });
+
+    setTasks([]);
+    setWithdrawals([]);
+    setMembers([]);
+    setAdminWithdrawals([]);
+    setDashboard({});
+
     setError("");
+    setNotice("");
+    setMobileOpen(false);
+  }, []);
 
-    try {
-      const [
-        meResult,
-        walletResult,
-        taskResult,
-        withdrawalResult,
-      ] = await Promise.all([
-        request("/auth/me", activeToken),
-        request("/wallet", activeToken),
-        request("/tasks", activeToken),
-        request("/withdrawals", activeToken),
-      ]);
+  const load = useCallback(
+    async (activeToken = token) => {
+      if (!activeToken) return;
 
-      const currentUser =
-        meResult.user ||
-        meResult.data ||
-        meResult;
+      setLoading(true);
+      setError("");
 
-      setUser(currentUser);
-
-      setWallet({
-        points:
-          walletResult.points ??
-          walletResult.wallet?.points ??
-          0,
-
-        balanceVND:
-          walletResult.balanceVND ??
-          walletResult.wallet?.balanceVND ??
-          0,
-
-        transactions:
-          walletResult.transactions ||
-          walletResult.wallet?.transactions ||
-          [],
-      });
-
-      setTasks(
-        Array.isArray(taskResult)
-          ? taskResult
-          : taskResult.tasks || taskResult.data || []
-      );
-
-      setWithdrawals(
-        Array.isArray(withdrawalResult)
-          ? withdrawalResult
-          : withdrawalResult.withdrawals ||
-            withdrawalResult.data ||
-            []
-      );
-
-      if (currentUser?.role === "admin") {
+      try {
         const [
-          dashResult,
-          memberResult,
-          adminWithdrawalResult,
+          meResult,
+          walletResult,
+          taskResult,
+          withdrawalResult,
         ] = await Promise.all([
-          request("/admin/dashboard", activeToken),
-          request("/admin/users", activeToken),
-          request("/admin/withdrawals", activeToken),
+          request("/auth/me", activeToken),
+          request("/wallet", activeToken),
+          request("/tasks", activeToken),
+          request("/withdrawals", activeToken),
         ]);
 
-        setDashboard(
-          dashResult.dashboard ||
-          dashResult.data ||
-          dashResult
+        const currentUser =
+          meResult.user ||
+          meResult.data?.user ||
+          meResult.data ||
+          meResult;
+
+        if (!currentUser) {
+          throw new Error("Không lấy được thông tin tài khoản.");
+        }
+
+        setUser(currentUser);
+
+        setWallet({
+          points:
+            walletResult.points ??
+            walletResult.wallet?.points ??
+            0,
+
+          balanceVND:
+            walletResult.balanceVND ??
+            walletResult.wallet?.balanceVND ??
+            0,
+
+          transactions:
+            walletResult.transactions ||
+            walletResult.wallet?.transactions ||
+            [],
+        });
+
+        setTasks(
+          getArray(taskResult, ["tasks"])
         );
 
-        setMembers(
-          Array.isArray(memberResult)
-            ? memberResult
-            : memberResult.users || memberResult.data || []
+        setWithdrawals(
+          getArray(withdrawalResult, ["withdrawals"])
         );
 
-        setAdminWithdrawals(
-          Array.isArray(adminWithdrawalResult)
-            ? adminWithdrawalResult
-            : adminWithdrawalResult.withdrawals ||
-              adminWithdrawalResult.data ||
-              []
-        );
-      } else {
-        setDashboard({});
-        setMembers([]);
-        setAdminWithdrawals([]);
+        if (currentUser.role === "admin") {
+          const [
+            dashResult,
+            memberResult,
+            adminWithdrawalResult,
+          ] = await Promise.all([
+            request("/admin/dashboard", activeToken),
+            request("/admin/users", activeToken),
+            request("/admin/withdrawals", activeToken),
+          ]);
+
+          setDashboard(
+            dashResult.dashboard ||
+              dashResult.data ||
+              dashResult
+          );
+
+          setMembers(
+            getArray(memberResult, ["users"])
+          );
+
+          setAdminWithdrawals(
+            getArray(adminWithdrawalResult, ["withdrawals"])
+          );
+        } else {
+          setDashboard({});
+          setMembers([]);
+          setAdminWithdrawals([]);
+        }
+      } catch (err) {
+        const message = getErrorMessage(err);
+
+        setError(message);
+
+        if (
+          /token|unauthorized|unauthenticated|đăng nhập|không có quyền/i.test(
+            message
+          )
+        ) {
+          logout();
+        }
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      setError(err.message || "Không thể tải dữ liệu tài khoản.");
-
-      if (
-        /token|unauthorized|unauthenticated|đăng nhập/i.test(
-          err.message || ""
-        )
-      ) {
-        localStorage.removeItem("earnhub_token");
-        setToken("");
-        setUser(null);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [token]);
+    },
+    [token, logout]
+  );
 
   useEffect(() => {
     if (token) {
@@ -211,7 +296,10 @@ function App() {
     }
   }, [token, load]);
 
-  async function run(action, successMessage = "Thao tác thành công.") {
+  async function run(
+    action,
+    successMessage = "Thao tác thành công."
+  ) {
     setBusy(true);
     setError("");
     setNotice("");
@@ -221,9 +309,11 @@ function App() {
 
       setNotice(successMessage);
 
-      await load(token);
+      if (token) {
+        await load(token);
+      }
     } catch (err) {
-      setError(err.message || "Có lỗi xảy ra. Vui lòng thử lại.");
+      setError(getErrorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -233,9 +323,43 @@ function App() {
     event.preventDefault();
 
     const form = new FormData(event.currentTarget);
-    const payload = Object.fromEntries(form.entries());
 
-    await run(async () => {
+    const username = String(
+      form.get("username") || ""
+    ).trim();
+
+    const password = String(
+      form.get("password") || ""
+    );
+
+    const email = String(
+      form.get("email") || ""
+    ).trim();
+
+    if (username.length < 3) {
+      setError("Tên tài khoản phải có ít nhất 3 ký tự.");
+      return;
+    }
+
+    if (password.length < 6) {
+      setError("Mật khẩu phải có ít nhất 6 ký tự.");
+      return;
+    }
+
+    const payload = {
+      username,
+      password,
+    };
+
+    if (authMode === "register" && email) {
+      payload.email = email;
+    }
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+
+    try {
       const result = await request(
         authMode === "login"
           ? "/auth/login"
@@ -253,35 +377,34 @@ function App() {
         result.data?.token;
 
       if (!newToken) {
-        throw new Error("Máy chủ không trả về token đăng nhập.");
+        throw new Error(
+          "Máy chủ không trả về token đăng nhập. Hãy kiểm tra API Backend."
+        );
       }
 
-      localStorage.setItem("earnhub_token", newToken);
+      localStorage.setItem(
+        "earnhub_token",
+        newToken
+      );
+
+      setUser(
+        result.user ||
+          result.data?.user ||
+          null
+      );
 
       setToken(newToken);
-      setUser(result.user || result.data?.user || null);
       setPage("overview");
-    }, authMode === "login"
-      ? "Đăng nhập thành công."
-      : "Đăng ký thành công."
-    );
-  }
-
-  function logout() {
-    localStorage.removeItem("earnhub_token");
-
-    setToken("");
-    setUser(null);
-    setPage("overview");
-
-    setWallet({
-      points: 0,
-      balanceVND: 0,
-      transactions: [],
-    });
-
-    setNotice("");
-    setError("");
+      setNotice(
+        authMode === "login"
+          ? "Đăng nhập thành công."
+          : "Đăng ký thành công."
+      );
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function createTask(event) {
@@ -289,7 +412,10 @@ function App() {
 
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    const payload = Object.fromEntries(form.entries());
+
+    const payload = Object.fromEntries(
+      form.entries()
+    );
 
     payload.points = Number(payload.points || 0);
 
@@ -308,9 +434,17 @@ function App() {
 
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    const payload = Object.fromEntries(form.entries());
+
+    const payload = Object.fromEntries(
+      form.entries()
+    );
 
     payload.points = Number(payload.points || 0);
+
+    if (payload.points < 1) {
+      setError("Số điểm rút không hợp lệ.");
+      return;
+    }
 
     await run(async () => {
       await request("/withdrawals", token, {
@@ -336,11 +470,16 @@ function App() {
       return;
     }
 
-    await run(() =>
-      request(`/admin/users/${member._id}/points`, token, {
-        method: "PATCH",
-        body: JSON.stringify({ points }),
-      }),
+    await run(
+      () =>
+        request(
+          `/admin/users/${member._id}/points`,
+          token,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ points }),
+          }
+        ),
       "Đã cập nhật số dư thành viên."
     );
   }
@@ -357,11 +496,16 @@ function App() {
       return;
     }
 
-    await run(() =>
-      request(`/admin/users/${member._id}/password`, token, {
-        method: "PATCH",
-        body: JSON.stringify({ password }),
-      }),
+    await run(
+      () =>
+        request(
+          `/admin/users/${member._id}/password`,
+          token,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ password }),
+          }
+        ),
       "Đã đổi mật khẩu thành viên."
     );
   }
@@ -372,11 +516,18 @@ function App() {
         ? "active"
         : "blocked";
 
-    await run(() =>
-      request(`/admin/users/${member._id}/status`, token, {
-        method: "PATCH",
-        body: JSON.stringify({ status: nextStatus }),
-      }),
+    await run(
+      () =>
+        request(
+          `/admin/users/${member._id}/status`,
+          token,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              status: nextStatus,
+            }),
+          }
+        ),
       nextStatus === "blocked"
         ? "Đã khóa tài khoản."
         : "Đã mở khóa tài khoản."
@@ -384,11 +535,16 @@ function App() {
   }
 
   async function processWithdrawal(item, status) {
-    await run(() =>
-      request(`/admin/withdrawals/${item._id}`, token, {
-        method: "PATCH",
-        body: JSON.stringify({ status }),
-      }),
+    await run(
+      () =>
+        request(
+          `/admin/withdrawals/${item._id}`,
+          token,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ status }),
+          }
+        ),
       status === "paid"
         ? "Đã xác nhận thanh toán."
         : "Đã từ chối yêu cầu."
@@ -465,7 +621,9 @@ function App() {
     },
   ];
 
-  const navItems = isAdmin ? adminNav : memberNav;
+  const navItems = isAdmin
+    ? adminNav
+    : memberNav;
 
   function navigate(nextPage) {
     setPage(nextPage);
@@ -490,71 +648,121 @@ function App() {
 
           <div className="auth-switch">
             <button
-              className={authMode === "login" ? "active" : ""}
-              onClick={() => setAuthMode("login")}
+              type="button"
+              className={
+                authMode === "login" ? "active" : ""
+              }
+              onClick={() => {
+                setAuthMode("login");
+                setError("");
+                setNotice("");
+              }}
             >
               Đăng nhập
             </button>
 
             <button
-              className={authMode === "register" ? "active" : ""}
-              onClick={() => setAuthMode("register")}
+              type="button"
+              className={
+                authMode === "register" ? "active" : ""
+              }
+              onClick={() => {
+                setAuthMode("register");
+                setError("");
+                setNotice("");
+              }}
             >
               Đăng ký
             </button>
           </div>
 
-          <form className="stack-form" onSubmit={submitAuth}>
+          <form
+            className="stack-form"
+            onSubmit={submitAuth}
+          >
+            <label>
+              Tên tài khoản
+
+              <input
+                name="username"
+                type="text"
+                minLength="3"
+                maxLength="24"
+                autoComplete="username"
+                required
+                placeholder="Nhập tên tài khoản"
+              />
+            </label>
+
             {authMode === "register" && (
               <label>
-                Tên tài khoản
+                Email (không bắt buộc)
+
                 <input
-                  name="username"
-                  minLength="3"
-                  maxLength="24"
-                  required
-                  placeholder="Tên đăng nhập"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="you@example.com"
                 />
               </label>
             )}
 
             <label>
-              Email
-              <input
-                name="email"
-                type="email"
-                required
-                placeholder="you@example.com"
-              />
-            </label>
-
-            <label>
               Mật khẩu
-              <input
-                name="password"
-                type="password"
-                minLength="6"
-                required
-                placeholder="Mật khẩu"
-              />
+
+              <div className="password-wrap">
+                <input
+                  name="password"
+                  type={
+                    showPassword
+                      ? "text"
+                      : "password"
+                  }
+                  minLength="6"
+                  autoComplete={
+                    authMode === "login"
+                      ? "current-password"
+                      : "new-password"
+                  }
+                  required
+                  placeholder="Nhập mật khẩu"
+                />
+
+                <button
+                  type="button"
+                  className="password-toggle"
+                  onClick={() =>
+                    setShowPassword((value) => !value)
+                  }
+                  aria-label={
+                    showPassword
+                      ? "Ẩn mật khẩu"
+                      : "Hiện mật khẩu"
+                  }
+                >
+                  {showPassword
+                    ? <EyeOff size={18} />
+                    : <Eye size={18} />}
+                </button>
+              </div>
             </label>
 
             {error && (
               <div className="alert error">
-                <AlertCircle size={16} />
-                {error}
+                <AlertCircle size={17} />
+                <span>{error}</span>
               </div>
             )}
 
             {notice && (
               <div className="alert success">
-                <CheckCircle2 size={16} />
-                {notice}
+                <CheckCircle2 size={17} />
+                <span>{notice}</span>
               </div>
             )}
 
             <button
-              className="btn primary"
+              className="btn primary auth-submit"
               type="submit"
               disabled={busy}
             >
@@ -565,6 +773,10 @@ function App() {
                   : "Tạo tài khoản"}
             </button>
           </form>
+
+          <p className="auth-footer">
+            Bảo mật tài khoản · EarnHub Pro
+          </p>
         </div>
       </div>
     );
@@ -581,13 +793,17 @@ function App() {
 
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
+      <aside
+        className={`sidebar ${
+          mobileOpen ? "open" : ""
+        }`}
+      >
         <div className="sidebar-brand">
           <div className="brand-mark">
             <CircleDollarSign size={25} />
           </div>
 
-          <div>
+          <div className="sidebar-brand-text">
             <b>EarnHub Pro</b>
             <small>Reward platform</small>
           </div>
@@ -603,19 +819,25 @@ function App() {
 
         <div className="sidebar-user">
           <div className="avatar">
-            {(user?.username || "U").slice(0, 1).toUpperCase()}
+            {(user?.username || "U")
+              .slice(0, 1)
+              .toUpperCase()}
           </div>
 
-          <div>
+          <div className="sidebar-user-info">
             <b>{user?.username || "Thành viên"}</b>
             <small>
-              {isAdmin ? "Quản trị viên" : "Thành viên"}
+              {isAdmin
+                ? "Quản trị viên"
+                : "Thành viên"}
             </small>
           </div>
         </div>
 
         <nav className="side-nav">
-          <span className="nav-caption">MENU CHÍNH</span>
+          <span className="nav-caption">
+            MENU CHÍNH
+          </span>
 
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -623,7 +845,9 @@ function App() {
             return (
               <button
                 key={item.id}
-                className={`nav-item ${page === item.id ? "active" : ""}`}
+                className={`nav-item ${
+                  page === item.id ? "active" : ""
+                }`}
                 onClick={() => navigate(item.id)}
               >
                 <Icon size={18} />
@@ -633,7 +857,10 @@ function App() {
           })}
         </nav>
 
-        <button className="logout-btn" onClick={logout}>
+        <button
+          className="logout-btn"
+          onClick={logout}
+        >
           <LogOut size={18} />
           Đăng xuất
         </button>
@@ -657,11 +884,15 @@ function App() {
             <Menu />
           </button>
 
-          <div>
-            <span className="topbar-eyebrow">EARNHUB PRO</span>
+          <div className="topbar-title">
+            <span className="topbar-eyebrow">
+              EARNHUB PRO
+            </span>
+
             <h1>
-              {navItems.find((item) => item.id === page)?.label ||
-                "Tổng quan"}
+              {navItems.find(
+                (item) => item.id === page
+              )?.label || "Tổng quan"}
             </h1>
           </div>
 
@@ -676,14 +907,24 @@ function App() {
               onClick={() => load(token)}
               disabled={loading}
               aria-label="Làm mới"
+              title="Làm mới dữ liệu"
             >
-              <RefreshCw size={18} />
+              <RefreshCw
+                size={18}
+                className={
+                  loading ? "spin" : ""
+                }
+              />
             </button>
           </div>
         </header>
 
         {(error || notice) && (
-          <div className={`global-message ${error ? "error" : "success"}`}>
+          <div
+            className={`global-message ${
+              error ? "error" : "success"
+            }`}
+          >
             {error
               ? <AlertCircle size={17} />
               : <CheckCircle2 size={17} />}
@@ -717,7 +958,10 @@ function App() {
               <Stat
                 icon={Users}
                 label="Thành viên"
-                value={money(dashboard.totalUsers ?? dashboard.usersCount)}
+                value={money(
+                  dashboard.totalUsers ??
+                    dashboard.usersCount
+                )}
                 hint="Tổng tài khoản"
               />
 
@@ -731,7 +975,9 @@ function App() {
               <Stat
                 icon={ArrowDownToLine}
                 label="Yêu cầu rút"
-                value={money(dashboard.pendingWithdrawals)}
+                value={money(
+                  dashboard.pendingWithdrawals
+                )}
                 hint="Đang chờ xử lý"
               />
 
@@ -758,7 +1004,9 @@ function App() {
                   icon={ArrowDownToLine}
                   title="Rút tiền"
                   desc="Duyệt yêu cầu rút tiền"
-                  onClick={() => navigate("withdrawals")}
+                  onClick={() =>
+                    navigate("withdrawals")
+                  }
                 />
 
                 <Quick
@@ -776,7 +1024,10 @@ function App() {
           <>
             <div className="page-intro">
               <div>
-                <h2>Xin chào, {user?.username || "bạn"}!</h2>
+                <h2>
+                  Xin chào, {user?.username || "bạn"}!
+                </h2>
+
                 <p className="muted">
                   Hoàn thành nhiệm vụ để tích lũy phần thưởng.
                 </p>
@@ -786,10 +1037,12 @@ function App() {
             <div className="balance-card">
               <div>
                 <span>SỐ DƯ HIỆN TẠI</span>
+
                 <h2>
                   {money(wallet.balanceVND)}
                   <small> VNĐ</small>
                 </h2>
+
                 <p>{money(wallet.points)} điểm</p>
               </div>
 
@@ -832,7 +1085,9 @@ function App() {
               </div>
 
               <TransactionTable
-                rows={(wallet.transactions || []).slice(0, 5)}
+                rows={(
+                  wallet.transactions || []
+                ).slice(0, 5)}
               />
             </div>
           </>
@@ -844,21 +1099,25 @@ function App() {
               <div>
                 <h2>Quản lý thành viên</h2>
                 <p className="muted">
-                  Tìm kiếm, điều chỉnh điểm và quản lý trạng thái tài khoản.
+                  Tìm kiếm, điều chỉnh điểm và quản lý tài khoản.
                 </p>
               </div>
             </div>
 
             <div className="panel">
-              <div className="panel-head">
-                <h3>Danh sách thành viên ({members.length})</h3>
+              <div className="panel-head members-head">
+                <h3>
+                  Danh sách thành viên ({members.length})
+                </h3>
 
                 <div className="search-box">
                   <Search size={17} />
 
                   <input
                     value={query}
-                    onChange={(event) => setQuery(event.target.value)}
+                    onChange={(event) =>
+                      setQuery(event.target.value)
+                    }
                     placeholder="Tìm tên hoặc email..."
                   />
                 </div>
@@ -879,8 +1138,11 @@ function App() {
                   <tbody>
                     {filteredUsers.map((member) => (
                       <tr key={member._id}>
-                        <td><b>{member.username}</b></td>
-                        <td>{member.email}</td>
+                        <td>
+                          <b>{member.username}</b>
+                        </td>
+
+                        <td>{member.email || "—"}</td>
                         <td>{member.role}</td>
 
                         <td>
@@ -901,17 +1163,20 @@ function App() {
                           <div className="action-row">
                             <button
                               className="icon-btn"
-                              title="Điều chỉnh điểm"
-                              onClick={() => adjustPoints(member)}
+                              title="Cộng điểm"
+                              onClick={() =>
+                                adjustPoints(member)
+                              }
                             >
                               <Plus size={16} />
-                              <Minus size={16} />
                             </button>
 
                             <button
                               className="icon-btn"
                               title="Đổi mật khẩu"
-                              onClick={() => resetPassword(member)}
+                              onClick={() =>
+                                resetPassword(member)
+                              }
                             >
                               <KeyRound size={16} />
                             </button>
@@ -923,7 +1188,9 @@ function App() {
                                   ? "Mở khóa"
                                   : "Khóa"
                               }
-                              onClick={() => toggleMember(member)}
+                              onClick={() =>
+                                toggleMember(member)
+                              }
                             >
                               {member.status === "blocked"
                                 ? <Unlock size={16} />
@@ -974,19 +1241,28 @@ function App() {
                   {adminWithdrawals.map((item) => (
                     <tr key={item._id}>
                       <td>
-                        {item.user?.username || item.username || "—"}
+                        {item.user?.username ||
+                          item.username ||
+                          "—"}
                       </td>
 
-                      <td>{money(item.amountVND)} VNĐ</td>
+                      <td>
+                        {money(item.amountVND)} VNĐ
+                      </td>
+
                       <td>{item.bankName}</td>
 
                       <td>
-                        {item.bankAccount}
-                        <small>{item.bankHolder}</small>
+                        <div>
+                          {item.bankAccount}
+                          <small>{item.bankHolder}</small>
+                        </div>
                       </td>
 
                       <td>
-                        <span className={`status-pill ${item.status}`}>
+                        <span
+                          className={`status-pill ${item.status}`}
+                        >
                           {item.status}
                         </span>
                       </td>
@@ -998,7 +1274,10 @@ function App() {
                               className="btn small primary"
                               disabled={busy}
                               onClick={() =>
-                                processWithdrawal(item, "paid")
+                                processWithdrawal(
+                                  item,
+                                  "paid"
+                                )
                               }
                             >
                               <CheckCircle2 size={15} />
@@ -1009,14 +1288,19 @@ function App() {
                               className="btn small danger"
                               disabled={busy}
                               onClick={() =>
-                                processWithdrawal(item, "rejected")
+                                processWithdrawal(
+                                  item,
+                                  "rejected"
+                                )
                               }
                             >
                               <XCircle size={15} />
                               Từ chối
                             </button>
                           </div>
-                        ) : "—"}
+                        ) : (
+                          "—"
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -1046,9 +1330,13 @@ function App() {
             <div className="panel form-panel">
               <h3>Tạo nhiệm vụ mới</h3>
 
-              <form className="task-form" onSubmit={createTask}>
+              <form
+                className="task-form"
+                onSubmit={createTask}
+              >
                 <label>
                   Tên nhiệm vụ
+
                   <input
                     name="title"
                     required
@@ -1058,6 +1346,7 @@ function App() {
 
                 <label>
                   Danh mục
+
                   <select name="category">
                     <option>Khảo sát</option>
                     <option>Xem quảng cáo</option>
@@ -1068,6 +1357,7 @@ function App() {
 
                 <label>
                   Điểm hiển thị
+
                   <input
                     name="points"
                     type="number"
@@ -1078,6 +1368,7 @@ function App() {
 
                 <label className="wide">
                   Mô tả
+
                   <textarea
                     name="description"
                     rows="3"
@@ -1101,11 +1392,15 @@ function App() {
 
               <div className="task-list">
                 {tasks.map((task) => (
-                  <div className="task-row" key={task._id}>
+                  <div
+                    className="task-row"
+                    key={task._id}
+                  >
                     <div>
                       <b>{task.title}</b>
                       <small>
-                        {task.category} · {money(task.points)} điểm ·{" "}
+                        {task.category} ·{" "}
+                        {money(task.points)} điểm ·{" "}
                         {task.isDemo ? "DEMO" : "Đối tác"}
                       </small>
                     </div>
@@ -1115,7 +1410,9 @@ function App() {
                         task.active ? "live" : "blocked"
                       }`}
                     >
-                      {task.active ? "Đang bật" : "Đã tắt"}
+                      {task.active
+                        ? "Đang bật"
+                        : "Đã tắt"}
                     </span>
                   </div>
                 ))}
@@ -1147,7 +1444,10 @@ function App() {
 
             <div className="task-grid">
               {tasks.map((task) => (
-                <div className="task-card" key={task._id}>
+                <div
+                  className="task-card"
+                  key={task._id}
+                >
                   <div className="task-icon">
                     <ClipboardList />
                   </div>
@@ -1165,7 +1465,9 @@ function App() {
 
                   <div className="task-bottom">
                     <b>{money(task.points)} điểm</b>
-                    <span className="status-pill pending">DEMO</span>
+                    <span className="status-pill pending">
+                      DEMO
+                    </span>
                   </div>
                 </div>
               ))}
@@ -1184,10 +1486,12 @@ function App() {
             <div className="balance-card compact">
               <div>
                 <span>SỐ DƯ HIỆN TẠI</span>
+
                 <h2>
                   {money(wallet.balanceVND)}
                   <small> VNĐ</small>
                 </h2>
+
                 <p>{money(wallet.points)} điểm</p>
               </div>
 
@@ -1206,7 +1510,9 @@ function App() {
                 </div>
               </div>
 
-              <TransactionTable rows={wallet.transactions || []} />
+              <TransactionTable
+                rows={wallet.transactions || []}
+              />
             </div>
           </>
         )}
@@ -1216,8 +1522,10 @@ function App() {
             <div className="page-intro">
               <div>
                 <h2>Tạo yêu cầu rút tiền</h2>
+
                 <p className="muted">
-                  Số dư hiện tại: {money(wallet.balanceVND)} VNĐ (
+                  Số dư hiện tại:{" "}
+                  {money(wallet.balanceVND)} VNĐ (
                   {money(wallet.points)} điểm).
                 </p>
               </div>
@@ -1233,6 +1541,7 @@ function App() {
                 >
                   <label>
                     Số điểm muốn rút
+
                     <input
                       name="points"
                       type="number"
@@ -1245,6 +1554,7 @@ function App() {
 
                   <label>
                     Ngân hàng
+
                     <input
                       name="bankName"
                       required
@@ -1254,6 +1564,7 @@ function App() {
 
                   <label>
                     Số tài khoản
+
                     <input
                       name="bankAccount"
                       required
@@ -1263,6 +1574,7 @@ function App() {
 
                   <label>
                     Chủ tài khoản
+
                     <input
                       name="bankHolder"
                       required
@@ -1281,8 +1593,8 @@ function App() {
                 </form>
 
                 <p className="hint">
-                  Tối thiểu 1.000đ. Điểm được trừ khi gửi yêu cầu;
-                  nếu bị từ chối, hệ thống hoàn điểm.
+                  Kiểm tra số dư và thông tin ngân hàng trước khi gửi.
+                  Quy tắc quy đổi điểm do Backend quyết định.
                 </p>
               </div>
 
@@ -1290,15 +1602,24 @@ function App() {
                 <h3>Lịch sử yêu cầu</h3>
 
                 {withdrawals.map((item) => (
-                  <div className="withdraw-row" key={item._id}>
+                  <div
+                    className="withdraw-row"
+                    key={item._id}
+                  >
                     <div>
-                      <b>{money(item.amountVND)}đ</b>
+                      <b>
+                        {money(item.amountVND)}đ
+                      </b>
+
                       <small>
-                        {item.bankName} · {date(item.createdAt)}
+                        {item.bankName} ·{" "}
+                        {date(item.createdAt)}
                       </small>
                     </div>
 
-                    <span className={`status-pill ${item.status}`}>
+                    <span
+                      className={`status-pill ${item.status}`}
+                    >
                       {item.status === "pending"
                         ? "Đang chờ"
                         : item.status === "paid"
@@ -1341,37 +1662,40 @@ function OfferwallPanel({ token }) {
     { id: "surveys", label: "Khảo sát" },
   ];
 
-  const loadTab = useCallback(async (type) => {
-    setLoading(true);
-    setError("");
+  const loadTab = useCallback(
+    async (type) => {
+      setLoading(true);
+      setError("");
 
-    try {
-      const result = await request(`/offerwall/${type}`, token);
+      try {
+        const result = await request(
+          `/offerwall/${type}`,
+          token
+        );
 
-      const rows = Array.isArray(result.data)
-        ? result.data
-        : Array.isArray(result)
-          ? result
-          : [];
+        const rows = getArray(result, [
+          "tasks",
+          "offers",
+          "surveys",
+        ]);
 
-      setData((previous) => ({
-        ...previous,
-        [type]: rows,
-      }));
+        setData((previous) => ({
+          ...previous,
+          [type]: rows,
+        }));
 
-      setLoaded((previous) => ({
-        ...previous,
-        [type]: true,
-      }));
-    } catch (err) {
-      setError(
-        err.message ||
-        "Không tải được dữ liệu Offerwall.me."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [token]);
+        setLoaded((previous) => ({
+          ...previous,
+          [type]: true,
+        }));
+      } catch (err) {
+        setError(getErrorMessage(err));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [token]
+  );
 
   useEffect(() => {
     if (!loaded[activeTab]) {
@@ -1400,31 +1724,54 @@ function OfferwallPanel({ token }) {
   function rewardOf(item) {
     const amount = Number(
       item.reward ??
-      item.payout ??
-      item.amount ??
-      0
+        item.payout ??
+        item.amount ??
+        0
     );
 
-    return Number.isFinite(amount) ? amount : 0;
+    return Number.isFinite(amount)
+      ? amount
+      : 0;
+  }
+
+  function rewardLabel(item) {
+    const currency =
+      item.currency ||
+      item.currency_code ||
+      item.reward_currency ||
+      "";
+
+    const value = rewardOf(item);
+
+    return (
+      value.toLocaleString("en-US", {
+        maximumFractionDigits: 4,
+      }) +
+      (currency ? ` ${currency}` : "")
+    );
   }
 
   function openItem(item) {
-    const url =
+    const url = safeExternalUrl(
       item.url ||
-      item.link ||
-      item.offer_url;
+        item.link ||
+        item.offer_url
+    );
 
-    if (
-      typeof url !== "string" ||
-      !/^https?:\/\//i.test(url)
-    ) {
+    if (!url) {
       window.alert(
-        "Mục này chưa có đường dẫn hợp lệ. Nhiệm vụ cần gửi minh chứng sẽ được tích hợp riêng."
+        "Nhiệm vụ này chưa có đường dẫn hợp lệ. Vui lòng thử nhiệm vụ khác."
       );
       return;
     }
 
-    window.open(url, "_blank", "noopener,noreferrer");
+    // Chỉ mở URL đối tác do API trả về.
+    // Chưa tự cộng thưởng khi người dùng nhấn nút.
+    window.open(
+      url,
+      "_blank",
+      "noopener,noreferrer"
+    );
   }
 
   const rows = data[activeTab] || [];
@@ -1434,20 +1781,42 @@ function OfferwallPanel({ token }) {
       <div className="page-intro">
         <div>
           <h2>Nhiệm vụ kiếm thưởng</h2>
+
           <p className="muted">
-            Dữ liệu lấy từ Offerwall.me. Phần thưởng chỉ được
-            ghi nhận khi đối tác gửi postback hợp lệ về máy chủ.
+            Nhiệm vụ được cung cấp bởi Offerwall.me.
+            Phần thưởng chỉ được cộng khi đối tác xác nhận
+            hoàn thành và máy chủ nhận Postback hợp lệ.
           </p>
         </div>
 
         <button
           className="btn subtle"
-          onClick={() => loadTab(activeTab)}
+          onClick={() => {
+            setLoaded((previous) => ({
+              ...previous,
+              [activeTab]: false,
+            }));
+
+            loadTab(activeTab);
+          }}
           disabled={loading}
         >
-          <RefreshCw size={16} />
+          <RefreshCw
+            size={16}
+            className={loading ? "spin" : ""}
+          />
+
           {loading ? "Đang tải..." : "Làm mới"}
         </button>
+      </div>
+
+      <div className="offerwall-notice">
+        <AlertCircle size={18} />
+
+        <span>
+          Giá trị hiển thị là thông tin do đối tác cung cấp,
+          không phải cam kết số tiền VNĐ sẽ được cộng vào ví.
+        </span>
       </div>
 
       <div className="offerwall-tabs">
@@ -1469,63 +1838,84 @@ function OfferwallPanel({ token }) {
 
       {error && (
         <div className="alert error">
-          <AlertCircle size={16} />
-          {error}
+          <AlertCircle size={17} />
+          <span>{error}</span>
+
+          <button
+            className="btn small subtle"
+            onClick={() => loadTab(activeTab)}
+          >
+            Thử lại
+          </button>
         </div>
       )}
 
       {loading && (
         <div className="empty">
+          <div className="loader" />
           Đang tải dữ liệu từ Offerwall.me...
         </div>
       )}
 
       {!loading && !error && rows.length === 0 && (
         <div className="empty">
-          Hiện chưa có mục khả dụng ở danh mục này.
-          Hãy thử làm mới sau.
+          <Gift size={30} />
+          <b>Chưa có nhiệm vụ khả dụng</b>
+          <span>
+            Hãy thử làm mới hoặc kiểm tra lại sau.
+          </span>
         </div>
       )}
 
       <div className="task-grid">
-        {rows.map((item, index) => (
-          <article
-            className="task-card"
-            key={
-              item.id ||
-              item.offer_id ||
-              item.task_id ||
-              index
-            }
-          >
-            <div className="task-icon">
-              <Activity size={22} />
-            </div>
+        {!loading &&
+          rows.map((item, index) => (
+            <article
+              className="task-card"
+              key={
+                item.id ||
+                item.offer_id ||
+                item.task_id ||
+                index
+              }
+            >
+              <div className="task-icon">
+                <Activity size={22} />
+              </div>
 
-            <span className="status-pill live">
-              Offerwall.me
-            </span>
+              <span className="status-pill live">
+                Offerwall.me
+              </span>
 
-            <h3>{titleOf(item)}</h3>
+              <h3>{titleOf(item)}</h3>
 
-            <p>{descriptionOf(item)}</p>
+              <p>{descriptionOf(item)}</p>
 
-            <div className="task-bottom">
-              <b>
-                {rewardOf(item).toLocaleString("en-US", {
-                  maximumFractionDigits: 4,
-                })}
-              </b>
+              <div className="offer-reward">
+                <Gift size={17} />
 
-              <button
-                className="btn primary"
-                onClick={() => openItem(item)}
-              >
-                Tham gia
-              </button>
-            </div>
-          </article>
-        ))}
+                <div>
+                  <small>Phần thưởng đối tác hiển thị</small>
+                  <b>{rewardLabel(item)}</b>
+                </div>
+              </div>
+
+              <div className="task-bottom">
+                <span className="offer-pending">
+                  <Clock size={14} />
+                  Chờ xác nhận
+                </span>
+
+                <button
+                  className="btn primary"
+                  onClick={() => openItem(item)}
+                >
+                  <ExternalLink size={15} />
+                  Tham gia
+                </button>
+              </div>
+            </article>
+          ))}
       </div>
     </section>
   );
@@ -1547,8 +1937,13 @@ function Stat({ icon: Icon, label, value, hint }) {
 
 function Quick({ icon: Icon, title, desc, onClick }) {
   return (
-    <button className="quick-link" onClick={onClick}>
-      <span><Icon /></span>
+    <button
+      className="quick-link"
+      onClick={onClick}
+    >
+      <span>
+        <Icon />
+      </span>
 
       <div>
         <b>{title}</b>
@@ -1605,7 +2000,9 @@ function TransactionTable({ rows = [] }) {
               </td>
 
               <td>
-                <span className={`status-pill ${row.status}`}>
+                <span
+                  className={`status-pill ${row.status}`}
+                >
                   {row.status === "completed"
                     ? "Hoàn tất"
                     : row.status === "pending"
